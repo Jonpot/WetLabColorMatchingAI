@@ -192,13 +192,135 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     tiprack_state = add_color('9', 'A2', 300, tiprack_state)
 
     close(tiprack_state)
-    return 
+    # return 
 
-    def active_learning() -> None:
+    def active_learning() -> bool:
         """
         The main loop of the protocol, which uses active learning to determine the best color match.
+        Each row's first position (column 1) contains the target color.
+        Columns 2-12 are used for experiment iterations.
+
+        Returns:
+            bool: True if all rows are completed, False otherwise.
         """
-        raise NotImplementedError
+        #TODO: Change according to the plate type
+        MAX_WELL_VOLUME = 200 
+        TOLERANCE = 30          
+        MIN_STEP = 1        
+        MAX_ITERATIONS = 11   
+
+        if not hasattr(active_learning, "initialized"):
+            active_learning.initialized = True
+            active_learning.current_row = 'A'
+            active_learning.rows_to_process = ['A', 'B', 'C', 'D', 'E', 'F', 'G'] #TODO: Change according to the plate type
+            active_learning.row_data = {}
+
+            color_data = get_color()
+            print("Reading target colors from column 1...")
+
+            for row in active_learning.rows_to_process:
+                row_idx = ord(row) - ord('A')
+                target_color = color_data[row_idx][0]
+                print(f"Row {row} target color: {target_color}")
+
+                covering_combos = generate_diverse_covering_combinations(
+                    dye_count=len(color_slots),
+                    n_combinations=4,
+                    max_volume=MAX_WELL_VOLUME,
+                    step=MIN_STEP
+                )
+
+                active_learning.row_data[row] = {
+                    'target_color': target_color,
+                    'current_iteration': 0,
+                    'X_train': [],
+                    'Y_train': [],
+                    'best_match': None,
+                    'best_distance': float('inf'),
+                    'completed': False,
+                    'covering_combinations': covering_combos
+                }
+
+        row = active_learning.current_row
+        row_data = active_learning.row_data[row]
+
+        while row_data['completed'] and row in active_learning.rows_to_process:
+            current_idx = active_learning.rows_to_process.index(row)
+            if current_idx + 1 < len(active_learning.rows_to_process):
+                active_learning.current_row = active_learning.rows_to_process[current_idx + 1]
+                row = active_learning.current_row
+                row_data = active_learning.row_data[row]
+            else:
+                print("All rows completed!")
+                return True
+
+        if row_data['current_iteration'] >= MAX_ITERATIONS:
+            print(f"Row {row} reached max iterations. Best match: {row_data['best_match']}")
+            row_data['completed'] = True
+            current_idx = active_learning.rows_to_process.index(row)
+            if current_idx + 1 < len(active_learning.rows_to_process):
+                active_learning.current_row = active_learning.rows_to_process[current_idx + 1]
+            else:
+                print("All rows completed!")
+                return True
+            return False
+
+        column = row_data['current_iteration'] + 2
+        well_coordinate = f"{row}{column}"
+        print(f"Row {row} - Iteration {row_data['current_iteration']+1} - Using well {well_coordinate}")
+
+        if row_data['current_iteration'] < len(row_data['covering_combinations']):
+            volumes = row_data['covering_combinations'][row_data['current_iteration']]
+        else:
+            volumes = random_forest_optimize_next_experiment(
+                row_data['X_train'],
+                row_data['Y_train'],
+                row_data['target_color'],
+                len(color_slots),
+                MAX_WELL_VOLUME,
+                MIN_STEP,
+                MAX_ITERATIONS
+            )
+
+
+        print(f"Adding dye combination: {volumes}")
+        for i, volume in enumerate(volumes):
+            if volume > 0:
+                add_color(color_slots[i], well_coordinate, volume)
+
+        color_data = get_color()
+        row_idx = ord(row) - ord('A')
+        col_idx = column - 1
+        measured_color = color_data[row_idx][col_idx]
+
+        print(f"Measured color: {measured_color}")
+
+        target_color = row_data['target_color']
+        distance = calculate_distance_to_target(measured_color, target_color)
+        print(f"Distance to target: {distance:.2f}")
+
+        row_data['X_train'].append(volumes)
+        row_data['Y_train'].append(measured_color)
+
+        if distance < row_data['best_distance']:
+            row_data['best_distance'] = distance
+            row_data['best_match'] = volumes
+            print(f"New best match! Distance: {distance:.2f}")
+
+        if within_tolerance(measured_color, target_color, TOLERANCE):
+            print(f"✓ Target matched for row {row}! Recipe: {volumes}")
+            row_data['completed'] = True
+            current_idx = active_learning.rows_to_process.index(row)
+            if current_idx + 1 < len(active_learning.rows_to_process):
+                active_learning.current_row = active_learning.rows_to_process[current_idx + 1]
+            else:
+                print("All rows completed!")
+                return True
+        else:
+            row_data['current_iteration'] += 1
+
+        return False
+
 
     # Main Loop
     i = 0
