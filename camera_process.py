@@ -213,21 +213,21 @@ class CameraImageProcessor:
         average_distance = np.mean(dist_matrix[np.triu_indices(len(selected_rgbs), k=1)])
         return mean_rgb, std_rgb, max_distance, min_distance, average_distance
 
-# Testing code (for module standalone testing)
-if __name__ == "__main__":
-    processor = CameraImageProcessor()
+# # Testing code (for module standalone testing)
+# if __name__ == "__main__":
+#     processor = CameraImageProcessor()
     
-    # 1. Capture a snapshot using the camera with adjustable properties (e.g., resolution)
-    adjustable_properties = {
-        cv2.CAP_PROP_FRAME_WIDTH: 1920,
-        cv2.CAP_PROP_FRAME_HEIGHT: 1080,
-    }
-    snapshot_path = processor.take_snapshot(cam_index=1, save_path="snapshot.jpg", warmup_frames=10, properties=adjustable_properties)
+#     # 1. Capture a snapshot using the camera with adjustable properties (e.g., resolution)
+#     adjustable_properties = {
+#         cv2.CAP_PROP_FRAME_WIDTH: 1920,
+#         cv2.CAP_PROP_FRAME_HEIGHT: 1080,
+#     }
+#     snapshot_path = processor.take_snapshot(cam_index=1, save_path="snapshot.jpg", warmup_frames=10, properties=adjustable_properties)
     
-    # 2. Process the captured image to obtain segmentation, well centers, and RGB matrix
-    segmented, centers, rgb_matrix, original = processor.process_image(snapshot_path, debug=True, plate_type="96")
-    rgb_static = processor.compute_rgb_statistics(rgb_matrix)
-    if rgb_matrix is not None:
-        print("RGB matrix shape:", rgb_matrix.shape)
-        print(rgb_matrix)
-        # print(rgb_static)
+#     # 2. Process the captured image to obtain segmentation, well centers, and RGB matrix
+#     segmented, centers, rgb_matrix, original = processor.process_image(snapshot_path, debug=True, plate_type="96")
+#     rgb_static = processor.compute_rgb_statistics(rgb_matrix)
+#     if rgb_matrix is not None:
+#         print("RGB matrix shape:", rgb_matrix.shape)
+#         print(rgb_matrix)
+#         # print(rgb_static)
