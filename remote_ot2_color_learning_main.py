@@ -235,27 +235,36 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         # A sample JSON file is:
         # {
         #     "is_updated": true,
-        #     "actions": {
-        #         "blink_lights": {
-        #             "num_blinks": 5
-        #          }
-        #     }
+        #     "actions": [
+        #         {
+        #            "blink_lights": {
+        #               "num_blinks": 5
+        #            }
+        #         },
+        #         {
+        #            "add_color": {
+        #               "color_slot": "7",
+        #               "plate_well": "A1",
+        #               "volume": 100
+        #            }
+        #         },
+        #     ]
         # }
         #
         # Note that the keys in "actions" are the names of the functions to call, and the values are the arguments to pass to those functions.
 
-        actions: List[Tuple[str, Dict[str, Any]]] = data.get("actions", {})
+        actions: List[Dict[str, Dict[str, Any]]] = data.get("actions", {})
         for action in actions:
-            action_name, args = action
-            if action_name in globals():
-                func = globals()[action_name]
-                if callable(func):
-                    func(args)
+            for subaction_name, subaction_args in action.items():
+                if subaction_name in globals():
+                    func = globals()[subaction_name]
+                    if callable(func):
+                        # Call the function with the arguments
+                        func(subaction_args)
+                    else:
+                        protocol.comment(f"{subaction_name} is not callable.")
                 else:
-                    protocol.comment(f"{action_name} is not callable.")
-
-            else:
-                protocol.comment(f"{action_name} not found in globals.")
+                    protocol.comment(f"{subaction_name} not found in globals.")
 
         # Set is_updated to False
         data["is_updated"] = False
