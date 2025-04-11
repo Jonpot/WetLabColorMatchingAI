@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import threading
 
 class OT2Manager:
-    def __init__(self, hostname: str, username: str, password: str, key_filename: str):        
+    def __init__(self, hostname: str, username: str, password: str, key_filename: str):
         # OT2 robot connection details
         self.hostname = hostname
         self.username = username
@@ -30,13 +30,15 @@ class OT2Manager:
             print(f"Error connecting to {self.hostname}: {e}")
             sys.exit(1)
 
+        # Initialize the args file and a flag to indicate when the remote process signals completion
         self.args = {"is_updated": False, "actions": []}
-        self._save_args_to_file("args.json")
-        self._upload_file("args.json")
+        self.finished_flag = False
+        self._save_args_to_file("args.jsonx")
+        self._upload_file("args.jsonx")
         self._start_robot_listener()
 
-    def _upload_file(self, local_path: str) -> None: 
-        # Upload the JSON file using SCP
+    def _upload_file(self, local_path: str) -> None:
+        """Upload a file using SCP without closing the SSH connection."""
         try:
             print("Uploading file using SCP...")
             with SCPClient(self.ssh.get_transport()) as scp:
@@ -44,118 +46,100 @@ class OT2Manager:
             print(f"Uploaded '{local_path}' to /root/ on the OT2 robot.")
         except Exception as e:
             print(f"Error during file upload using SCP: {e}")
-            self.ssh.close()
-            sys.exit(1)
-        
-    def _execute_command(self, command: str) -> None:
-        # Execute the command on the OT2 robot to run the test_lights.py script
-        print(f"Executing remote command: {command}")
-        try:
-            stdin, stdout, stderr = self.ssh.exec_command(command)
-            output = stdout.read().decode()
-            errors = stderr.read().decode()
-            if output:
-                print("Command output:")
-                print(output)
-            if errors:
-                print("Command errors:")
-                print(errors)
-        except Exception as e:
-            print(f"Error executing remote command: {e}")
-        finally:
-            self.ssh.close()
-            print("SSH connection closed.")
-        
-    #def _start_robot_listener(self) -> None:
-    #    # Start the robot listener in a separate thread
-    #    def listener_thread():
-    #        global finished_flag
-    #        finished_flag = False
-    #        command = "cd /root/ && opentrons_execute remote_ot2_color_learning_main.py"
-    #        print(f"Executing remote command: {command}")
-    #        try:
-    #            stdin, stdout, stderr = self.ssh.exec_command(command)
-    #            for line in iter(stdout.readline, ""):
-    #                print(line.strip())
-    #                if "Ready" in line.strip():
-    #                    finished_flag = True
-    #                    print("Finished flag set to True")
-    #        except Exception as e:
-    #            print(f"Error executing remote command: {e}")
-    #        finally:
-    #            self.ssh.close()
-    #            print("SSH connection closed.")
-#
-    #    # Start the listener thread
-    #    thread = threading.Thread(target=listener_thread, daemon=True)
-    #    thread.start()
 
     def _start_robot_listener(self) -> None:
-        # Start the robot listener in a separate thread
-        global finished_flag
-        finished_flag = False
-        command = "cd /root/ && opentrons_execute remote_ot2_color_learning_main.py"
-        print(f"Executing remote command: {command}")
-        try:
-            stdin, stdout, stderr = self.ssh.exec_command(command)
-            for line in iter(stdout.readline, ""):
-                print(line.strip())
-                if "Ready" in line.strip():
-                    finished_flag = True
-                    print("Finished flag set to True")
-        except Exception as e:
-            print(f"Error executing remote command: {e}")
-        finally:
-            self.ssh.close()
-            print("SSH connection closed.")
+        """
+        Start a dedicated thread that opens an interactive shell,
+        sends the environment setup and command to run the protocol,
+        and continuously reads the output until a "Ready" signal is detected.
+        """
+        def listener():
+            try:
+                # Open an interactive shell session (PTY)
+                channel = self.ssh.invoke_shell()
+                print("Starting remote robot listener via interactive shell...")
+                # Send commands to set the environment variable, change directory, and start the process.
+                channel.send("export RUNNING_ON_PI=1\n")
+                channel.send("cd /root/\n")
+                channel.send("opentrons_execute remote_ot2_color_learning_main.py\n")
+                
+                # Continuously read output from the remote process.
+                buffer = ""
+                while True:
+                    if channel.recv_ready():
+                        output = channel.recv(1024).decode('utf-8')
+                        buffer += output
+                        # Process complete lines from the buffered output
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            if line.strip():
+                                print(line.strip())
+                                if "Ready" in line:
+                                    self.finished_flag = True
+                                    print("Finished flag set to True")
+                    # Exit loop if the channel is closed.
+                    if channel.closed:
+                        print("Remote shell channel closed.")
+                        break
+                    time.sleep(0.5)
+            except Exception as e:
+                print(f"Error in remote listener: {e}")
 
-    def _add_action(self, action_name: str, action_value: Optional[Dict[str, Any]] = None) -> None:
-        # Add an action to the args list
-        if action_value is None:
-            action_value = {}
+        listener_thread = threading.Thread(target=listener, daemon=True)
+        listener_thread.start()
+
+    def _add_action(self, action_name: str, action_value: Optional[Dict[str, Any]] = {}) -> None:
+        """Add an action to the args list."""
         self.args["actions"].append({action_name: action_value})
         self.args["is_updated"] = True
         print(f"Added action: {action_name} with value: {action_value}")
 
     def _save_args_to_file(self, filename: str) -> None:
+        """Save the current args to a JSON file."""
         with open(filename, 'w') as f:
-            json.dump(self.args, fp=f)
+            json.dump(self.args, f)
         print(f"Saved args to {filename}")
 
     def _listen_for_completion(self) -> None:
-        # Wait for the robot to finish executing the commands
-        while not finished_flag:
+        """Wait until the remote process signals 'Ready'."""
+        while not self.finished_flag:
             print("Waiting for robot to finish...")
             time.sleep(5)
+        # Reset the flag for future operations
+        self.finished_flag = False
 
     def execute_actions_on_remote(self) -> None:
-        global finished_flag
-        # Save the args to a JSON file
-        filename = "args.json"
+        """
+        Save and upload the args file and then wait for the remote process
+        to signal that it is ready for new instructions.
+        """
+        filename = "args.jsonx"
         self._save_args_to_file(filename)
-
-        # Upload the JSON file to the OT2 robot
-        finished_flag = False
         self._upload_file(filename)
-
-        # The server will automatically detect the new file and execute them
-        # Block until the robot finishes executing the commands
         self._listen_for_completion()
 
     def add_blink_lights_action(self, num_blinks: int) -> None:
-        # Add the blink lights action to the args list
+        """Queue a blink lights action."""
         self._add_action("blink_lights", {"num_blinks": num_blinks})
 
+    def add_turn_on_lights_action(self) -> None:
+        """Queue a turn on lights action."""
+        self._add_action("turn_on_lights")
+
+    def add_turn_off_lights_action(self) -> None:
+        """Queue a turn off lights action."""
+        self._add_action("turn_off_lights")
+
     def add_close_action(self) -> None:
-        # Add the close action to the args list
+        """Queue a close action."""
         self._add_action("close")
 
     def add_add_color_action(self, color_slot: str, plate_well: str, volume: float) -> None:
-        # Add the add color action to the args list
+        """Queue an add color action."""
         self._add_action("add_color", {"color_slot": color_slot, "plate_well": plate_well, "volume": volume})
 
     def __del__(self) -> None:
-        # Ensure the SSH connection is closed when the object is deleted
+        # Close the SSH connection when the object is deleted.
         if self.ssh:
             self.ssh.close()
             print("SSH connection closed.")

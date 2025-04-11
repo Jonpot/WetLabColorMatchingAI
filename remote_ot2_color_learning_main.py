@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Tuple
 from opentrons import protocol_api
 import time 
 
-color_slots = ['7','8','9']
+color_slots = ['4','5','6','7','8','9','10','11']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 metadata = {
@@ -18,7 +18,7 @@ requirements = {'robotType': 'OT-2', 'apiLevel': '2.19'}
 
 def run(protocol: protocol_api.ProtocolContext) -> None:
     """Defines the testing protocol."""
-
+    protocol.comment("Start of run.")
     class Well:
         """
         Represents a well on a plate.
@@ -56,7 +56,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 filename,
             )
         # print in the run log where the output file is
-        protocol.comment(f"output file path = {output_file_destination_path}")
+        #protocol.comment(f"output file path = {output_file_destination_path}")
         return output_file_destination_path
 
     def setup(plate_type: str = "corning_96_wellplate_360ul_flat") -> tuple[dict[str, protocol_api.Labware],
@@ -125,21 +125,11 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
 
     ### CALLABLE FUNCTIONS ###
-    def blink_lights(args: Dict[str, Any]) -> None:
+    def blink_lights(num_blinks: int) -> None:
         """
-        Blink the lights on and off a number of times equal to the int in ./args.json
+        Blink the lights on and off a number of times equal to the int in ./args.jsonx
         times
         """
-        # Check if 'num_blinks' is in args and is an integer
-        if 'num_blinks' not in args:
-            protocol.comment("num_blocks not found in args.json")
-            return
-        try:
-            num_blinks = int(args['num_blinks'])
-        except ValueError:
-            protocol.comment("num_blocks is not an int")
-            return
-        
         protocol.comment(f"Blinking lights {num_blinks} times.")
 
         # Blink the lights
@@ -147,6 +137,21 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             protocol.set_rail_lights(on=True)
             time.sleep(0.5)
             protocol.set_rail_lights(on=False)
+            time.sleep(0.5)
+
+    def turn_on_lights() -> None:
+        """
+        Turns on the lights.
+        """
+        protocol.comment("Turning on lights.")
+        protocol.set_rail_lights(on=True)
+
+    def turn_off_lights() -> None:
+        """
+        Turns off the lights.
+        """
+        protocol.comment("Turning off lights.")
+        protocol.set_rail_lights(on=False)
     
     def add_color(
             color_slot: str | int,
@@ -165,7 +170,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
             raise ValueError("Cannot add color to well; well is full.")
 
-        tiprack_state = pick_up_tip(tiprack_state)
+        pick_up_tip()
         pipette.aspirate(volume, colors[color_slot])
         pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
         pipette.dispense(volume, plate.labware[plate_well].bottom(z=81))
@@ -188,7 +193,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         if  protocol.is_simulating():
             # don't save tiprack state in simulation
             return
-        with open(get_filename('color_matching_tiprack.json'), 'w') as f:
+        with open(get_filename('color_matching_tiprack.jsonx'), 'w') as f:
             json.dump(tiprack_state, fp=f)
 
         run_flag = False
@@ -199,20 +204,23 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     #plate_type = get_plate_type()
     plate_type = "corning_96_wellplate_360ul_flat" # TODO: Remove this line when get_plate_type is implemented 
-    #colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type)
+    global tiprack_state, run_flag
+    protocol.comment("Loading labware and instruments...")
+    colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type)
     # Wait for the json to change
 
     run_flag = True
+    protocol.comment("Ready")
     while run_flag:
         try:
-            with open(get_filename('args.json'), 'r') as f:
+            with open(get_filename('args.jsonx'), 'r') as f:
                 data: Dict[str, Any] = json.load(f)
         except FileNotFoundError:
-            protocol.comment(f"{get_filename("args.json")} not found. Waiting...")
+            protocol.comment(f"{get_filename('args.jsonx')} not found. Waiting...")
             time.sleep(1)
             continue
         except json.JSONDecodeError:
-            protocol.comment("args.json is not valid JSON. Waiting...")
+            protocol.comment("args.jsonx is not valid JSON. Waiting...")
             time.sleep(1)
             continue
         except Exception as e:
@@ -221,14 +229,15 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             continue
 
         if "is_updated" not in data:
-            protocol.comment("is_updated not found in args.json. Waiting...")
+            protocol.comment("is_updated not found in args.jsonx. Waiting...")
             time.sleep(1)
             continue
 
         if not data["is_updated"]:
             time.sleep(5)
+            continue
 
-        protocol.comment("args.json is updated. Running commands...")
+        protocol.comment("args.jsonx is updated. Running commands...")
 
         # At this point, we have a valid JSON file and is_updated is True
         # Now we must (a) set is_updated to False, and (b) run all the commands in the JSON file
@@ -256,15 +265,29 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         actions: List[Dict[str, Dict[str, Any]]] = data.get("actions", {})
         for action in actions:
             for subaction_name, subaction_args in action.items():
-                if subaction_name in globals():
-                    func = globals()[subaction_name]
-                    if callable(func):
-                        # Call the function with the arguments
-                        func(subaction_args)
-                    else:
-                        protocol.comment(f"{subaction_name} is not callable.")
+                protocol.comment(f"Running {subaction_name} with args: {subaction_args}")
+                #if subaction_name in globals():
+                #    func = globals()[subaction_name]
+                #    if callable(func):
+                #        # Call the function with the arguments
+                #        func(subaction_args)
+                #    else:
+                #        protocol.comment(f"{subaction_name} is not callable.")
+                #else:
+                #    protocol.comment(f"{subaction_name} not found in globals.")
+                if subaction_name == "blink_lights":
+                    blink_lights(subaction_args['num_blinks'])
+                elif subaction_name == "turn_on_lights":
+                    turn_on_lights()
+                elif subaction_name == "turn_off_lights":
+                    turn_off_lights()
+                elif subaction_name == "add_color":
+                    add_color(subaction_args["color_slot"], subaction_args["plate_well"], subaction_args["volume"])
+                elif subaction_name == "close":
+                    close()
+                    break
                 else:
-                    protocol.comment(f"{subaction_name} not found in globals.")
+                    protocol.comment(f"{subaction_name} not found in defined commands.")
 
         # Set is_updated to False
         data["is_updated"] = False
@@ -272,7 +295,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         data.pop("actions", None)
 
         # Write the updated JSON back to the file
-        with open(get_filename('args.json'), 'w') as f:
+        with open(get_filename('args.jsonx'), 'w') as f:
             json.dump(data, f)
-        protocol.comment("args.json updated. Waiting for next update...")
+        protocol.comment("args.jsonx updated. Waiting for next update...")
         protocol.comment("Ready")
