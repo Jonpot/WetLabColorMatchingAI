@@ -39,8 +39,8 @@ class PlateProcessor:
     def set_camera_properties(cap, properties):
         """
         Set camera properties (e.g., resolution) via a dictionary:
-          { cv2.CAP_PROP_FRAME_WIDTH: 1920,
-            cv2.CAP_PROP_FRAME_HEIGHT: 1080, ... }
+        { cv2.CAP_PROP_FRAME_WIDTH: 1920,
+          cv2.CAP_PROP_FRAME_HEIGHT: 1080, ... }
         """
         for prop, value in properties.items():
             cap.set(prop, value)
@@ -63,7 +63,7 @@ class PlateProcessor:
         if properties:
             PlateProcessor.set_camera_properties(cap, properties)
 
-        # Warm up the camera by discarding several frames
+        # Discard several frames for warming up
         for i in range(warmup_frames):
             ret, _ = cap.read()
             if not ret:
@@ -357,7 +357,7 @@ class PlateProcessor:
     def calibrate_from_file(self, image_path, calib_filename="calibration.json"):
         """
         Calibrate using an existing image file.
-        If a calibration file exists, user is prompted about reusing it.
+        If a calibration file exists, the user is prompted whether to reuse it.
         If not, run the calibration UI and save results.
         Returns (calib_data, resized_img, scale).
         """
@@ -464,4 +464,24 @@ class PlateProcessor:
         rgb_matrix = self.extract_rgb_values(resized_img, centers, x_offset=rx1, y_offset=ry1)
         return rgb_matrix
 
-
+# --------------------------------------------------------------------
+# Example usage (uncomment to run as a script):
+# if __name__ == "__main__":
+#     processor = PlateProcessor()
+#
+#     rgb_matrix = processor.process_image(
+#         image_path="4.jpg",
+#         calib_filename="calibration.json",
+#         cam_index=0,
+#         warmup=5
+#     )
+#
+#     print("RGB matrix shape:", rgb_matrix.shape)
+#     stats = processor.compute_rgb_statistics(rgb_matrix)
+#     if stats is not None:
+#         mean_rgb, std_rgb, max_d, min_d, avg_d = stats
+#         print("Mean RGB:", mean_rgb)
+#         print("Std  RGB:", std_rgb)
+#         print("Max Dist:", max_d)
+#         print("Min Dist:", min_d)
+#         print("Avg Dist:", avg_d)
