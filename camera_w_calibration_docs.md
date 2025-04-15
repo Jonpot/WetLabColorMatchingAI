@@ -1,4 +1,3 @@
-```markdown
 # PlateProcessor API Documentation
 
 ## Overview
@@ -37,9 +36,7 @@ The `PlateProcessor` class provides a high-level interface for calibrating and e
 
 ### Initialization
 
-```
 PlateProcessor()
-```
 
 **What It Does:**
 
@@ -276,4 +273,3 @@ if stats is not None:
 ---
 
 *This documentation outlines the core PlateProcessor API, explaining each method, its parameters, and usage examples. For more advanced or custom workflows, you can extend `PlateProcessor` or integrate it with higher-level automation scripts in your pipeline.*  
-```
