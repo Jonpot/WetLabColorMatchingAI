@@ -229,27 +229,35 @@ stats = processor.compute_rgb_statistics(rgb_matrix)
 ## Usage Example
 
 ```python
-from camera_w_calibration import PlateProcessor
+from plate_processor import PlateProcessor
 
+# 1) Instantiate the class
 processor = PlateProcessor()
 
-rgb_matrix = processor.process_image(
-    image_path="3.jpg",
-    calib_filename="calibration.json",
-    cam_index=0,
-    warmup=5
+# 2) Possibly take a snapshot from camera index 0
+snapshot_path = processor.take_snapshot(cam_index=0, save_path="snapshot.jpg", warmup_frames=5)
+
+# 3) Calibrate the newly captured image (or an existing image)
+calib_data, resized_img, scale = processor.calibrate_from_file(
+    image_path="snapshot.jpg",
+    calib_filename="calibration.json"
 )
 
-print(rgb_matrix)
-print("RGB matrix shape:", rgb_matrix.shape)
+# 4) Process the image to extract RGB matrix
+rgb_matrix = processor.process_image(
+    image_path="snapshot.jpg",
+    calib_filename="calibration.json"
+)
+
+# 5) Optionally compute statistics
 stats = processor.compute_rgb_statistics(rgb_matrix)
 if stats is not None:
-    mean_rgb, std_rgb, max_d, min_d, avg_d = stats
+    mean_rgb, std_rgb, max_dist, min_dist, avg_dist = stats
     print("Mean RGB:", mean_rgb)
-    print("Std  RGB:", std_rgb)
-    print("Max Dist:", max_d)
-    print("Min Dist:", min_d)
-    print("Avg Dist:", avg_d)
+    print("Std RGB:", std_rgb)
+    print("Max Dist:", max_dist)
+    print("Min Dist:", min_dist)
+    print("Avg Dist:", avg_dist)
 ```
 
 ### Workflow Summary
