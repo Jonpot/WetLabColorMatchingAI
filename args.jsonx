@@ -1,1 +1,1 @@
-{"is_updated": true, "actions": [{"turn_on_lights": {}}, {"add_color": {"color_slot": "7", "plate_well": "A1", "volume": 30}}, {"add_color": {"color_slot": "8", "plate_well": "A2", "volume": 30}}, {"blink_lights": {"num_blinks": 5}}, {"turn_off_lights": {}}, {"add_color": {"color_slot": "7", "plate_well": "A1", "volume": 30}}, {"close": {}}]}
+{"is_updated": true, "actions": [{"turn_on_lights": {}}, {"add_color": {"color_slot": "7", "plate_well": "A1", "volume": 30}}, {"add_color": {"color_slot": "8", "plate_well": "A2", "volume": 30}}]}

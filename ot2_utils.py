@@ -36,6 +36,9 @@ class OT2Manager:
         self._save_args_to_file("args.jsonx")
         self._upload_file("args.jsonx")
         self._start_robot_listener()
+        self._listen_for_completion()
+        print("OT2Manager initialized and ready.")
+
 
     def _upload_file(self, local_path: str) -> None:
         """Upload a file using SCP without closing the SSH connection."""
@@ -61,6 +64,18 @@ class OT2Manager:
                 # Send commands to set the environment variable, change directory, and start the process.
                 channel.send("export RUNNING_ON_PI=1\n")
                 channel.send("cd /root/\n")
+
+                # Check server status
+                channel.send("STATUS=$(systemctl is-active opentrons-robot-server)\n")
+                channel.send("echo Service is: $STATUS\n")
+                channel.send("if [ \"$STATUS\" = \"active\" ]; then\n")
+                channel.send("  echo Stopping robot server...\n")
+                channel.send("  systemctl stop opentrons-robot-server\n")
+                channel.send("else\n")
+                channel.send("  echo Robot server is not running. No need to stop.\n")
+                channel.send("fi\n")
+
+                # Start the remote script
                 channel.send("opentrons_execute remote_ot2_color_learning_main.py\n")
                 
                 # Continuously read output from the remote process.
@@ -102,10 +117,14 @@ class OT2Manager:
 
     def _listen_for_completion(self) -> None:
         """Wait until the remote process signals 'Ready'."""
+        tries = 0
         while not self.finished_flag:
-            print("Waiting for robot to finish...")
+            tries += 1
+            print(f"\rWaiting for robot to finish... [Attempt #{tries}]", end="")
+            sys.stdout.flush()
             time.sleep(5)
         # Reset the flag for future operations
+        print("Robot finished processing. Finished flag reset.")
         self.finished_flag = False
 
     def execute_actions_on_remote(self) -> None:
@@ -117,6 +136,10 @@ class OT2Manager:
         self._save_args_to_file(filename)
         self._upload_file(filename)
         self._listen_for_completion()
+
+        self.args["is_updated"] = False  # Reset the update flag for the next set of actions
+        self.args["actions"] = []
+        print("Actions executed on remote. Ready for new instructions.")
 
     def add_blink_lights_action(self, num_blinks: int) -> None:
         """Queue a blink lights action."""

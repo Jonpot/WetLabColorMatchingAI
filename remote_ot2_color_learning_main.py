@@ -73,13 +73,16 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         # Some tips may be missing, so we need to update the current state of the tip rack from
         # the file. This is necessary to avoid the robot trying to use tips that are not present.
 
-        # Check ./color_matching_tiprack.json exists, if not make it and assume full rack
+        # Check ./color_matching_tiprack.jsonx exists, if not make it and assume full rack
         try:
-            with open(get_filename('color_matching_tiprack.json'), 'r') as f:
+            with open(get_filename('color_matching_tiprack.jsonx'), 'r') as f:
                 tiprack_state = json.load(f)
         except FileNotFoundError:
+            protocol.comment(f"{get_filename('color_matching_tiprack.jsonx')} not found. Assuming full rack.")
             tiprack_state = [True] * 96
         except json.JSONDecodeError:
+            protocol.comment(f"{get_filename('color_matching_tiprack.jsonx')} is not valid JSON. Assuming full rack.")
+            protocol.comment(f"(The file had the following contents: {f.read()})")
             tiprack_state = [True] * 96
 
         colors: dict[str, protocol_api.Labware] = {}
