@@ -2,41 +2,38 @@
 
 ## Overview
 
-The `PlateProcessor` class provides a high-level interface for **calibrating** and **extracting color data** from plate images. It offers an **interactive calibration window** where you can drag corner points, select a plate type (12, 24, 48, or 96 wells), and save the resulting configuration to a JSON file for subsequent automated processing. It also includes **camera utilities** for taking snapshots and listing available cameras.  
+The `PlateProcessor` class provides a high-level interface for **calibrating** and **extracting color data** from plate images. It offers an **interactive calibration window** where you can drag corner points, select a plate type (12‑, 24‑, 48‑, or 96‑well), and save the resulting configuration to a JSON file for subsequent automated processing. It also includes **camera utilities** for taking snapshots and listing available cameras.
 
 ### Key Features
 
-- **Interactive Corner-Dragging UI**  
-  Manually calibrate the plate region by dragging four corner points. The code **clamps** these corners to remain inside the image boundaries.  
-- **3-Minute Timeout**  
-  If you do not confirm within 3 minutes, the UI automatically exits and reports that calibration was canceled.  
+- **Interactive Corner‑Dragging UI**  
+  Manually calibrate the plate region by dragging four corner points. The code **clamps** these corners so they always stay inside the image boundaries.  
+- **3‑Minute Timeout**  
+  If you do not confirm within 3 minutes, the UI automatically exits and reports that calibration was canceled.  
 - **Automatic JSON Storage**  
-  Persists calibration data in a `.json` file, so repeated calibrations are not necessary unless you explicitly choose to re-calibrate.  
-- **Well Center Computation**  
-  Based on plate type selection, automatically computes the (x, y) center positions of each well.  
+  Calibration data are persisted in a `.json` file, so repeated calibrations are unnecessary unless you explicitly choose to re‑calibrate.  
+- **Well‑Center Computation**  
+  Once a plate type is chosen, the class automatically computes the (x, y) center coordinates for each well.  
 - **Color Extraction**  
   Collects RGB values at each well center, optionally averaging a small neighborhood for noise reduction.  
-- **Camera Utility**  
-  Includes helper functions to list available cameras and capture snapshots via DirectShow.  
-- **One-Step Image Processing**  
-  The `process_image` method can detect if an image is missing, automatically capture one from the camera, and then request calibration if no valid JSON exists.
+- **Camera Utilities**  
+  Helper functions let you list available cameras and capture snapshots via DirectShow.  
+- **One‑Step Capture & Processing**  
+  The revamped `process_image` method **always captures a fresh snapshot**, creates calibration data on first use, and then returns a `(3 × N)` RGB matrix in a single call.
 
 ---
 
 ## Requirements
 
-- **Python 3.x**  
-- **OpenCV** (cv2)  
-  *Installation:* `pip install opencv-python`
-- **NumPy**  
-  *Installation:* `pip install numpy`
-- **json, os, time** (Built-in Python modules)
-- **Optional**: SciPy (if you want to use `compute_rgb_statistics` for advanced distance metrics)  
-  *Installation:* `pip install scipy`
+- **Python 3.x**  
+- **OpenCV (cv2)** – `pip install opencv-python`  
+- **NumPy** – `pip install numpy`  
+- **Built‑in modules:** `json`, `os`, `time`  
+- **Optional:** SciPy (for `compute_rgb_statistics`) – `pip install scipy`
 
 ---
 
-## Class: PlateProcessor
+## Class: `PlateProcessor`
 
 ### Initialization
 
@@ -44,55 +41,32 @@ The `PlateProcessor` class provides a high-level interface for **calibrating** a
 processor = PlateProcessor()
 ```
 
-**What It Does:**
-
-- Prepares internal data structures to handle the interactive calibration (corner points, mouse callbacks, confirmation flag).
-- Clamps dragged corners within image boundaries.
-- Enforces a 3-minute UI timeout if the user does not confirm calibration.
+This prepares the interactive calibration logic (corner points, mouse callbacks, confirmation flag), clamps dragged corners within image boundaries, and enforces the 3‑minute UI timeout.
 
 ---
 
 ## Methods
 
-### Camera & Utility Methods
+### Camera & Utility Methods
 
 <details>
 <summary><code>list_cameras(max_tested=10) -> List[int]</code></summary>
 
-**Description:**  
-Checks camera indices from 0 up to `max_tested-1` using DirectShow. Returns which ones are valid/usable.
+Checks camera indices `0 … max_tested‑1` using DirectShow and returns the usable indices.
 
-**Parameters:**  
-- `max_tested`: Maximum number of camera indices to test.
-
-**Returns:**  
-- A list of valid camera indices.
-
-**Usage Example:**
 ```python
 valid_cams = PlateProcessor.list_cameras()
-print("Available camera indices:", valid_cams)
+print(valid_cams)
 ```
 </details>
 
 <details>
 <summary><code>take_snapshot(cam_index=0, save_path="snapshot.jpg", warmup_frames=10, properties=None) -> str</code></summary>
 
-**Description:**  
-Captures a single image from the specified camera index (using DirectShow on Windows). Supports optional camera property settings (e.g., resolution).
+Captures one image from the specified camera. Optional `properties` lets you adjust resolution or other `cv2.CAP_PROP_*` settings.
 
-**Parameters:**  
-- `cam_index`: Which camera to use (default 0).
-- `save_path`: Filename/path to save the snapshot.
-- `warmup_frames`: Number of frames to discard before taking the final snapshot (for exposure stabilization).
-- `properties`: A dictionary of `cv2.CAP_PROP_*` settings to adjust the camera.
-
-**Returns:**  
-- The `save_path` where the snapshot is saved.
-
-**Usage Example:**
 ```python
-snapshot_path = PlateProcessor.take_snapshot(cam_index=1, save_path="my_photo.jpg")
+snap = PlateProcessor.take_snapshot(cam_index=1, save_path="my_photo.jpg")
 ```
 </details>
 
@@ -101,77 +75,34 @@ snapshot_path = PlateProcessor.take_snapshot(cam_index=1, save_path="my_photo.jp
 ### Calibration Methods
 
 <details>
-<summary><code>calibrate_from_file(image_path, calib_filename="calibration.json") -> (dict, np.ndarray, float)</code></summary>
+<summary><code>calibrate_from_file(image_path, calib_filename="calibration.json") -> Tuple[dict, np.ndarray, float]</code></summary>
 
-**Description:**  
-Performs calibration using an existing image on disk. If `calibration.json` exists, the user is prompted to reuse or overwrite it. If it doesn’t exist (or is deleted), an **interactive window** opens, letting you drag corner points and pick a plate type. The code will time out if left unconfirmed for 3 minutes.
-
-**Parameters:**  
-- `image_path`: Path to the image file for calibration.
-- `calib_filename`: File path for the JSON where calibration data is saved.
-
-**Returns:**  
-- A tuple containing:
-  1. `calib_data` (dict) with rectangle coordinates and plate type.
-  2. `resized_img` (numpy array) used for calibration UI.
-  3. `scale` (float) for the resizing factor.
-
-**Usage Example:**
-```python
-processor = PlateProcessor()
-calib_data, resized_img, scale = processor.calibrate_from_file("plate_photo.jpg")
-```
+Performs calibration using an existing image. If `calibration.json` already exists, you can reuse or overwrite it; otherwise an interactive window appears. The UI times out after 3 minutes.
 </details>
 
 <details>
 <summary><code>calibrate_from_camera(cam_index=0, snapshot_path="calibration_pic.jpg", calib_filename="calibration.json", warmup=10)</code></summary>
 
-**Description:**  
-1. Captures an image from the specified camera index.  
-2. Immediately uses `calibrate_from_file` on that newly captured image.  
-3. Saves calibration data to JSON.
-
-**Parameters:**  
-- `cam_index`: Camera index for capture.
-- `snapshot_path`: Where to save the captured image.
-- `calib_filename`: JSON file to store calibration info.
-- `warmup`: How many frames to discard before snapping the final photo.
-
-**Usage Example:**  
-```python
-calib_data, resized, scale = processor.calibrate_from_camera(
-    cam_index=0,
-    snapshot_path="live_calibration_pic.jpg",
-    calib_filename="calibration.json",
-    warmup=5
-)
-```
+1. Captures a snapshot from the chosen camera.  
+2. Immediately calls `calibrate_from_file` on that snapshot.  
+3. Saves the calibration to JSON.
 </details>
 
 <details>
-<summary><code>process_image(image_path, calib_filename="calibration.json", cam_index=0, warmup=10) -> np.ndarray</code></summary>
+<summary><code>process_image(cam_index: int = 0,
+              warmup: int = 10,
+              image_path: str | None = None,
+              calib_filename: str = "calibration.json") -> np.ndarray</code></summary>
 
-**Description:**  
-A one-step method to ensure an image is available (otherwise it snaps one from the camera) and calibration is present (otherwise it launches UI). Then it extracts a `(3, N)` RGB matrix based on the bounding rectangle and plate type from JSON.
+**NEW BEHAVIOR (v2):**
 
-**Parameters:**  
-- `image_path`: Path to the image or a desired filename for a snapshot.
-- `calib_filename`: The JSON file with calibration data.
-- `cam_index`: Which camera index to use if we must capture a snapshot.
-- `warmup`: Warm-up frames for the camera.
+1. **Always captures a fresh snapshot.** If `image_path` is `None`, a timestamped JPEG such as `snapshot_20250419_203015.jpg` is created automatically.  
+2. If `calibration.json` is missing, it launches the calibration UI once and stores the result.  
+3. Applies the saved calibration rectangle & plate type to the new snapshot and returns a `(3 × N)` matrix of RGB values (rows = R,G,B; columns = wells).
 
-**Returns:**  
-- `(3, N)` array of RGB values from the wells.
-
-**Usage Example:**  
 ```python
-rgb_matrix = processor.process_image(
-    image_path="my_plate.jpg",
-    calib_filename="calibration.json",
-    cam_index=0,
-    warmup=5
-)
-print("RGB matrix shape:", rgb_matrix.shape)
+rgb = processor.process_image(cam_index=0, warmup=5)
+print(rgb.shape)  # (3, N)
 ```
 </details>
 
@@ -179,129 +110,56 @@ print("RGB matrix shape:", rgb_matrix.shape)
 
 ### Other Helper Methods
 
-<details>
-<summary><code>resize_to_fit(img, max_width=1280, max_height=720) -> (np.ndarray, float)</code></summary>
-
-**Description:**  
-Resizes an image while preserving aspect ratio so that it does not exceed the given max width and height. Returns the resized image and the scale factor.
-
-</details>
-
-<details>
-<summary><code>plate_from_trackbar(val: int) -> str</code></summary>
-
-**Description:**  
-Maps the trackbar integer value (0..3) to a string representing the plate type ("12", "24", "48", "96").  
-Used internally during calibration UI to reflect the user’s choice.
-
-</details>
-
-<details>
-<summary><code>get_well_centers_boxed_grid(x1, y1, x2, y2, plate_type="96") -> List[Tuple[int,int]]</code></summary>
-
-**Description:**  
-Computes the (x, y) coordinates of well centers within a rectangular region. The grid size depends on the chosen plate type.
-
-</details>
-
-<details>
-<summary><code>extract_rgb_values(image, centers, x_offset=0, y_offset=0) -> np.ndarray</code></summary>
-
-**Description:**  
-Extracts the RGB values at each center plus its 4-connected neighbors, then averages them. Returns a `(3, N)` matrix of RGB values.
-
-</details>
-
-<details>
-<summary><code>compute_rgb_statistics(rgb_matrix_transposed) -> Tuple</code></summary>
-
-**Description:**  
-Given a `(3 x N)` matrix (RGB values), it computes several statistics: mean, standard deviation, and pairwise Euclidean distances (max, min, and average). Requires SciPy.
-
-```python
-stats = processor.compute_rgb_statistics(rgb_matrix)
-(mean_rgb, std_rgb, max_dist, min_dist, avg_dist) = stats
-```
-</details>
+* `resize_to_fit(img, max_width=1280, max_height=720)` → (resized_img, scale)
+* `plate_from_trackbar(val)` → "12" | "24" | "48" | "96"
+* `get_well_centers_boxed_grid(x1, y1, x2, y2, plate_type)` → List[(x,y)]
+* `extract_rgb_values(image, centers, x_offset=0, y_offset=0)` → `np.ndarray` (3 × N)
+* `compute_rgb_statistics(rgb_matrix)` → (mean, std, max_dist, min_dist, avg_dist)
 
 ---
 
-## Usage Example
+## End‑to‑End Usage Example
 
 ```python
 from plate_processor import PlateProcessor
 
-# 1) Instantiate the class
 processor = PlateProcessor()
 
-# 2) Possibly take a snapshot from camera index 0
-snapshot_path = processor.take_snapshot(cam_index=0, save_path="snapshot.jpg", warmup_frames=5)
+# ‑‑> One‑liner: capture, (auto‑)calibrate, extract colors
+rgb = processor.process_image(cam_index=0, warmup=5)
+print(rgb.shape)
 
-# 3) Calibrate the newly captured image (or an existing image)
-calib_data, resized_img, scale = processor.calibrate_from_file(
-    image_path="snapshot.jpg",
-    calib_filename="calibration.json"
-)
-
-# 4) Process the image to extract RGB matrix
-rgb_matrix = processor.process_image(
-    image_path="snapshot.jpg",
-    calib_filename="calibration.json"
-)
-
-# 5) Optionally compute statistics
-stats = processor.compute_rgb_statistics(rgb_matrix)
-if stats is not None:
-    mean_rgb, std_rgb, max_dist, min_dist, avg_dist = stats
-    print("Mean RGB:", mean_rgb)
-    print("Std RGB:", std_rgb)
-    print("Max Dist:", max_dist)
-    print("Min Dist:", min_dist)
-    print("Avg Dist:", avg_dist)
+# Optional statistics
+stats = processor.compute_rgb_statistics(rgb)
+if stats:
+    mean_rgb, std_rgb, max_d, min_d, avg_d = stats
+    print(mean_rgb, std_rgb)
 ```
 
-### Workflow Summary
+---
 
-1. **Initialization:**  
-   Create an instance of `PlateProcessor`. This sets up the corner-dragging UI logic, camera utilities, and a 3-minute calibration timeout.
+## Workflow Summary
 
-2. **Image Capture (Optional):**  
-   Use `take_snapshot()` to capture a photo from a chosen camera index.
-
-3. **Calibration:**  
-   - Use `calibrate_from_file(...)` to open a window if needed.  
-   - Drag corners, choose plate type, confirm within 3 minutes or it times out.  
-   - The bounding rectangle + plate type are stored in a JSON file.
-
-4. **Color Extraction:**  
-   - `process_image()` loads calibration from JSON. If the image doesn’t exist, it captures one automatically.  
-   - Extracts `(3, N)` RGB data from each well center.
-
-5. **Statistics (Optional):**  
-   - `compute_rgb_statistics()` can produce mean/std of the colors, plus pairwise distances for advanced analysis.
+1. **Instantiation** – `processor = PlateProcessor()`.
+2. **First call to `process_image()`** – captures a snapshot, opens the calibration UI, stores `calibration.json`, returns RGB data.
+3. **Subsequent calls** – captures a new snapshot, silently reuses the existing calibration, and returns updated RGB matrices.
 
 ---
 
 ## Error Handling & Debugging
 
-- **Image Load Failures**  
-  If `cv2.imread()` fails (e.g., invalid path), the code raises a `FileNotFoundError`.  
-- **Calibration Timeout**  
-  If the user does not confirm within 3 minutes during calibration, it auto-cancels and returns `None`.  
-- **Headless Environments**  
-  Running in a context with no GUI (e.g., a remote server) will prevent windows from appearing. Use a local environment with display capability.  
+- **Snapshot Failure** – raises `FileNotFoundError` if the image cannot be read after capture.
+- **Calibration Timeout / Cancel** – if you close the calibration window or let it time out, a `RuntimeError` is raised.
+- **Headless Environments** – calibration UI requires a display; use a local machine or remote desktop with GUI support.
 
 ---
 
 ## Contribution Guidelines
 
-- **Modifying the Calibration UI**  
-  If you add features or tweak the corner logic, ensure the “drag + confirm” user experience remains intuitive.  
-- **Extending Calibration Data**  
-  If adding new metadata to `calibration.json`, maintain backward compatibility so older JSON files remain valid.  
-- **Testing & Validation**  
-  Always test in an environment where OpenCV windows can appear. Confirm your changes with real images and hardware.  
-- **Documentation**  
-  Update this file if any public methods change (signatures, new parameters, etc.). Provide usage examples for new features.
+- Keep the drag‑and‑confirm workflow intuitive when modifying the UI.
+- Preserve backward compatibility with older `calibration.json` files if you extend the stored metadata.
+- Test changes with real hardware; the calibration window must render correctly.
+- Update this markdown whenever a public method signature or behavior is changed.
 
 ---
+

@@ -411,77 +411,67 @@ class PlateProcessor:
     # ------------------- Modified process_image ----------------------
     # ----------------------------------------------------------------
 
-    def process_image(self,
-                      image_path="snapshot.jpg",
-                      calib_filename="calibration.json",
-                      cam_index=0,
-                      warmup=10):
+    def process_image(
+            self,
+            cam_index: int = 0,
+            warmup: int = 10,
+            image_path: str | None = None,
+            calib_filename: str = "calibration.json",
+            snapshot_file: str = "snapshot.jpg" 
+    ) -> np.ndarray:
         """
-        1) If 'image_path' does not exist, take a snapshot from camera 'cam_index' and save to 'image_path'.
-        2) If 'calibration.json' does not exist, perform calibration on that image.
-        3) Finally, load the calibration data and extract the (3 x N) RGB matrix.
-
-        :param image_path: Path to the image to process (or to be created if it doesn't exist).
-        :param calib_filename: JSON file with calibration data.
-        :param cam_index: Which camera index to use if we must capture a snapshot.
-        :param warmup: Number of frames to warm up the camera before snapshot.
-        :return: (3 x N) NumPy array of RGB values from the wells.
+        • Always capture a fresh frame into SNAPSHOT_FILE (constant name).
+        • If calibration data is missing, launch the UI once, then reuse it.
+        • Return a 3 × N RGB matrix for the current plate.
         """
-        # 1) If no valid image is found, take a snapshot
-        if not os.path.exists(image_path):
-            print(f"Image '{image_path}' not found. Capturing from camera index {cam_index}...")
-            self.take_snapshot(cam_index=cam_index,
-                               save_path=image_path,
-                               warmup_frames=warmup)
-            if not os.path.exists(image_path):
-                raise FileNotFoundError("Failed to capture an image from camera.")
 
-        # 2) If calibration file doesn't exist, calibrate using the found image
+        # ------------------------------------------------------------------
+        # 1)  Capture — always overwrite the constant file
+        # ------------------------------------------------------------------
+        if image_path is None:
+            image_path = snapshot_file         # <── use the constant
+
+        self.take_snapshot(
+            cam_index=cam_index,
+            save_path=image_path,
+            warmup_frames=warmup,
+        )
+
+        # ------------------------------------------------------------------
+        # 2)  Ensure calibration data exists
+        # ------------------------------------------------------------------
         if not os.path.exists(calib_filename):
-            print(f"Calibration file '{calib_filename}' not found. Starting calibration...")
-            calib_data, resized_img, scale = self.calibrate_from_file(image_path, calib_filename)
-            if not calib_data:
-                raise RuntimeError("Calibration canceled. No calibration data available.")
+            print("[INFO] No calibration file found – entering calibration UI…")
+            calib_data, _, _ = self.calibrate_from_file(
+                image_path=image_path,
+                calib_filename=calib_filename,
+            )
+            if calib_data is None:
+                raise RuntimeError("Calibration aborted – no data saved.")
         else:
-            # If it does exist, we assume it is valid
             with open(calib_filename, "r") as f:
                 calib_data = json.load(f)
 
-        # 3) Load the calibrated ROI and extract colors
+        # ------------------------------------------------------------------
+        # 3)  Extract the RGB matrix
+        # ------------------------------------------------------------------
         img = cv2.imread(image_path)
         if img is None:
-            raise FileNotFoundError(f"Could not load image: {image_path}")
+            raise FileNotFoundError(f"Unable to read snapshot: {image_path}")
 
         resized_img, _ = self.resize_to_fit(img, 1280, 720)
 
-        rx1 = calib_data["rectangle"]["x1"]
-        ry1 = calib_data["rectangle"]["y1"]
-        rx2 = calib_data["rectangle"]["x2"]
-        ry2 = calib_data["rectangle"]["y2"]
+        rect = calib_data["rectangle"]
+        rx1, ry1, rx2, ry2 = rect["x1"], rect["y1"], rect["x2"], rect["y2"]
         plate_type = calib_data["plate_type"]
 
-        centers = self.get_well_centers_boxed_grid(rx1, ry1, rx2, ry2, plate_type)
-        rgb_matrix = self.extract_rgb_values(resized_img, centers, x_offset=rx1, y_offset=ry1)
+        centers = self.get_well_centers_boxed_grid(
+            rx1, ry1, rx2, ry2, plate_type
+        )
+        rgb_matrix = self.extract_rgb_values(
+            resized_img, centers, x_offset=rx1, y_offset=ry1
+        )
         return rgb_matrix
 
-# --------------------------------------------------------------------
-# Example usage (uncomment to run as a script):
-# if __name__ == "__main__":
-#     processor = PlateProcessor()
-#
-#     rgb_matrix = processor.process_image(
-#         image_path="4.jpg",
-#         calib_filename="calibration.json",
-#         cam_index=0,
-#         warmup=5
-#     )
-#
-#     print("RGB matrix shape:", rgb_matrix.shape)
-#     stats = processor.compute_rgb_statistics(rgb_matrix)
-#     if stats is not None:
-#         mean_rgb, std_rgb, max_d, min_d, avg_d = stats
-#         print("Mean RGB:", mean_rgb)
-#         print("Std  RGB:", std_rgb)
-#         print("Max Dist:", max_d)
-#         print("Min Dist:", min_d)
-#         print("Avg Dist:", avg_d)
+
+
