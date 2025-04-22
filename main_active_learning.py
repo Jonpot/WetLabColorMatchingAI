@@ -11,6 +11,10 @@ robot = OT2Manager(
     password="lemos" 
 )
 
+robot.add_blink_lights_action(num_blinks=3)
+robot.add_turn_on_lights_action()
+robot.execute_actions_on_remote()
+
 # Define dye reservoir slots and plate rows
 color_slots = ['7', '8', '9']
 plate_rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
@@ -95,5 +99,6 @@ for row in plate_rows:
 print("Color Matching Complete!")
 
 # Close session
+robot.add_turn_off_lights_action()
 robot.add_close_action()
 robot.execute_actions_on_remote()
