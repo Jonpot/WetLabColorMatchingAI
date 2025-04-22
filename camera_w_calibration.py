@@ -124,33 +124,54 @@ class PlateProcessor:
         return centers
 
     @staticmethod
-    def extract_rgb_values(image, centers, x_offset=0, y_offset=0):
+    def extract_rgb_values(image, centers, rows=8, cols=12, x_offset=0, y_offset=0):
         """
-        For each center (cx, cy), sample the color in a small 5-pixel region
-        (the center + 4-connected neighbors). Compute the average BGR->RGB
-        and return a (3 x N) matrix (rows = R/G/B, columns = wells).
+        For each center (cx, cy), sample the color in a small 5‑pixel region
+        (the center + its 4 neighbors). Compute the average BGR->RGB and
+        return a Python list-of-lists of shape (rows x cols), where each
+        entry is [R, G, B] for that well.
+        
+        Arguments:
+        - image:       OpenCV image array (H x W x 3, BGR)
+        - centers:     flat list of (cx, cy) tuples, length should be rows*cols
+        - rows, cols:  desired output matrix dimensions
+        - x_offset, y_offset: if your centers are in a sub-image, use offsets
+        
+        Returns:
+        - rgb_matrix:  list of length `rows`, each an inner list of length `cols`;
+                       rgb_matrix[r][c] == [avg_R, avg_G, avg_B] for that well
         """
         h, w = image.shape[:2]
-        rgb_values = []
+        if len(centers) != rows * cols:
+            raise ValueError(f"Expected {rows*cols} centers, got {len(centers)}")
+        
+        flat_rgb = []
         for cx, cy in centers:
             local_cx = cx - x_offset
             local_cy = cy - y_offset
-            pixels = []
-            for dx, dy in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]:
+
+            samples = []
+            for dx, dy in [(0,0),(-1,0),(1,0),(0,-1),(0,1)]:
                 x = local_cx + dx
                 y = local_cy + dy
                 if 0 <= x < w and 0 <= y < h:
-                    bgr = image[y, x]
-                    pixels.append(bgr)
-            if pixels:
-                avg_bgr = np.mean(pixels, axis=0)
-                # Convert from BGR to RGB
-                rgb_values.append([avg_bgr[2], avg_bgr[1], avg_bgr[0]])
+                    b, g, r = image[y, x]
+                    samples.append((r, g, b))
+            if samples:
+                avg_r, avg_g, avg_b = np.mean(samples, axis=0)
             else:
-                rgb_values.append([0, 0, 0])
-        rgb_matrix = np.array(rgb_values).T  # shape: (3, N)
-        return rgb_matrix
+                avg_r = avg_g = avg_b = 0.0
 
+            flat_rgb.append([float(avg_r), float(avg_g), float(avg_b)])
+
+        # reshape flat list into rows x cols
+        rgb_matrix = []
+        for r in range(rows):
+            row_vals = flat_rgb[r*cols : (r+1)*cols]
+            rgb_matrix.append(row_vals)
+
+        return rgb_matrix
+    
     @staticmethod
     def compute_rgb_statistics(rgb_matrix_transposed):
         """

@@ -48,6 +48,7 @@ for row in plate_rows:
 
     row_idx = ord(row) - ord('A')
     target_color = color_data[row_idx][0]  # Column 1 is the target color
+    print(f"Target color: {target_color}")
 
     completed = False
     current_iteration = 0
