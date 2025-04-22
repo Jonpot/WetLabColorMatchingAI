@@ -3,6 +3,7 @@ import time
 import numpy as np
 import json
 import os
+import matplotlib.pyplot as plt
 
 class PlateProcessor:
     def __init__(self):
@@ -161,8 +162,8 @@ class PlateProcessor:
                 avg_r, avg_g, avg_b = np.mean(samples, axis=0)
             else:
                 avg_r = avg_g = avg_b = 0.0
-
-            flat_rgb.append([float(avg_r), float(avg_g), float(avg_b)])
+            b,g,r = image[local_cx, local_cy]
+            flat_rgb.append([float(r), float(g), float(b)])
 
         # reshape flat list into rows x cols
         rgb_matrix = []
@@ -193,6 +194,38 @@ class PlateProcessor:
         # average distance (upper triangle only, to avoid duplicates)
         avg_distance = np.mean(dist_matrix[np.triu_indices(len(selected_rgbs), k=1)])
         return (mean_rgb, std_rgb, max_distance, min_distance, avg_distance)
+
+    def visualize_rgb_matrix(rgb_matrix):
+        """
+        Visualize the RGB matrix as a 96-well plate layout.
+        Each well is represented by a circle colored based on its RGB value.
+        """
+        rows, cols, _ = rgb_matrix.shape  # Get the dimensions of the plate
+        fig, ax = plt.subplots(figsize=(cols, rows))  # Adjust figure size based on plate dimensions
+
+        # Set spacing between wells
+        x_spacing = 1
+        y_spacing = 1
+
+        for row in range(rows):
+            for col in range(cols):
+                rgb = rgb_matrix[row, col] / 255.0  # Normalize RGB values to [0, 1] for matplotlib
+                circle = plt.Circle(
+                    (col * x_spacing, -row * y_spacing),  # Position wells in a grid
+                    radius=0.4,  # Radius of the circle
+                    color=rgb,  # Set circle color
+                    edgecolor="black"
+                )
+                ax.add_artist(circle)
+
+        # Adjust plot limits and aspect ratio
+        ax.set_xlim(-1, cols * x_spacing)
+        ax.set_ylim(-rows * y_spacing, 1)
+        ax.set_aspect("equal")
+        ax.axis("off")  # Turn off axes for a cleaner look
+
+        plt.title("96-Well Plate RGB Visualization")
+        plt.show()
 
     # ----------------------------------------------------------------
     # --------------------- Calibration UI ----------------------------
