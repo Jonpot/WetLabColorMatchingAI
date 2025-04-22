@@ -40,7 +40,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             return self.wells[row][column]
 
     def get_filename() -> str:
-        filename = "color_matching_tiprack.json'"
+        filename = "color_matching_tiprack.json"
         # use Path.home() on Mac, Linux, and on the robot   
         output_file_destination_path = Path.home().joinpath(
             filename
@@ -145,8 +145,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     def add_color(
             color_slot: str | int,
             plate_well: str,
-            volume: float,
-            tiprack_state: list[bool]) -> list[bool]:
+            volume: float) -> None:
         """
         Adds a color to the plate at the specified well.
 
@@ -156,6 +155,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         :raises ValueError: If the well is already full.
         """
+        global tiprack_state
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
             raise ValueError("Cannot add color to well; well is full.")
 
