@@ -161,8 +161,8 @@ class PlateProcessor:
                 avg_r, avg_g, avg_b = np.mean(samples, axis=0)
             else:
                 avg_r = avg_g = avg_b = 0.0
-
-            flat_rgb.append([float(avg_r), float(avg_g), float(avg_b)])
+            b,g,r = image[local_cx, local_cy]
+            flat_rgb.append([float(r), float(g), float(b)])
 
         # reshape flat list into rows x cols
         rgb_matrix = []
