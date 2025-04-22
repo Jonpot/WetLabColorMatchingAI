@@ -3,6 +3,7 @@ import time
 import numpy as np
 import json
 import os
+import matplotlib.pyplot as plt
 
 class PlateProcessor:
     def __init__(self):
@@ -124,33 +125,54 @@ class PlateProcessor:
         return centers
 
     @staticmethod
-    def extract_rgb_values(image, centers, x_offset=0, y_offset=0):
+    def extract_rgb_values(image, centers, rows=8, cols=12, x_offset=0, y_offset=0):
         """
-        For each center (cx, cy), sample the color in a small 5-pixel region
-        (the center + 4-connected neighbors). Compute the average BGR->RGB
-        and return a (3 x N) matrix (rows = R/G/B, columns = wells).
+        For each center (cx, cy), sample the color in a small 5‑pixel region
+        (the center + its 4 neighbors). Compute the average BGR->RGB and
+        return a Python list-of-lists of shape (rows x cols), where each
+        entry is [R, G, B] for that well.
+        
+        Arguments:
+        - image:       OpenCV image array (H x W x 3, BGR)
+        - centers:     flat list of (cx, cy) tuples, length should be rows*cols
+        - rows, cols:  desired output matrix dimensions
+        - x_offset, y_offset: if your centers are in a sub-image, use offsets
+        
+        Returns:
+        - rgb_matrix:  list of length `rows`, each an inner list of length `cols`;
+                       rgb_matrix[r][c] == [avg_R, avg_G, avg_B] for that well
         """
         h, w = image.shape[:2]
-        rgb_values = []
+        if len(centers) != rows * cols:
+            raise ValueError(f"Expected {rows*cols} centers, got {len(centers)}")
+        
+        flat_rgb = []
         for cx, cy in centers:
             local_cx = cx - x_offset
             local_cy = cy - y_offset
-            pixels = []
-            for dx, dy in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]:
+
+            samples = []
+            for dx, dy in [(0,0),(-1,0),(1,0),(0,-1),(0,1)]:
                 x = local_cx + dx
                 y = local_cy + dy
                 if 0 <= x < w and 0 <= y < h:
-                    bgr = image[y, x]
-                    pixels.append(bgr)
-            if pixels:
-                avg_bgr = np.mean(pixels, axis=0)
-                # Convert from BGR to RGB
-                rgb_values.append([avg_bgr[2], avg_bgr[1], avg_bgr[0]])
+                    b, g, r = image[y, x]
+                    samples.append((r, g, b))
+            if samples:
+                avg_r, avg_g, avg_b = np.mean(samples, axis=0)
             else:
-                rgb_values.append([0, 0, 0])
-        rgb_matrix = np.array(rgb_values).T  # shape: (3, N)
-        return rgb_matrix
+                avg_r = avg_g = avg_b = 0.0
+            b,g,r = image[local_cx, local_cy]
+            flat_rgb.append([float(r), float(g), float(b)])
 
+        # reshape flat list into rows x cols
+        rgb_matrix = []
+        for r in range(rows):
+            row_vals = flat_rgb[r*cols : (r+1)*cols]
+            rgb_matrix.append(row_vals)
+
+        return rgb_matrix
+    
     @staticmethod
     def compute_rgb_statistics(rgb_matrix_transposed):
         """
@@ -172,6 +194,38 @@ class PlateProcessor:
         # average distance (upper triangle only, to avoid duplicates)
         avg_distance = np.mean(dist_matrix[np.triu_indices(len(selected_rgbs), k=1)])
         return (mean_rgb, std_rgb, max_distance, min_distance, avg_distance)
+
+    def visualize_rgb_matrix(rgb_matrix):
+        """
+        Visualize the RGB matrix as a 96-well plate layout.
+        Each well is represented by a circle colored based on its RGB value.
+        """
+        rows, cols, _ = rgb_matrix.shape  # Get the dimensions of the plate
+        fig, ax = plt.subplots(figsize=(cols, rows))  # Adjust figure size based on plate dimensions
+
+        # Set spacing between wells
+        x_spacing = 1
+        y_spacing = 1
+
+        for row in range(rows):
+            for col in range(cols):
+                rgb = rgb_matrix[row, col] / 255.0  # Normalize RGB values to [0, 1] for matplotlib
+                circle = plt.Circle(
+                    (col * x_spacing, -row * y_spacing),  # Position wells in a grid
+                    radius=0.4,  # Radius of the circle
+                    color=rgb,  # Set circle color
+                    edgecolor="black"
+                )
+                ax.add_artist(circle)
+
+        # Adjust plot limits and aspect ratio
+        ax.set_xlim(-1, cols * x_spacing)
+        ax.set_ylim(-rows * y_spacing, 1)
+        ax.set_aspect("equal")
+        ax.axis("off")  # Turn off axes for a cleaner look
+
+        plt.title("96-Well Plate RGB Visualization")
+        plt.show()
 
     # ----------------------------------------------------------------
     # --------------------- Calibration UI ----------------------------

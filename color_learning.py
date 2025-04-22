@@ -1,183 +1,158 @@
 import numpy as np
-import math
 import random
+import math
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
+from scipy.optimize import nnls
+from scipy.linalg import lstsq
 
-def calculate_distance_to_target(color, target_rgb):
-    return math.sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(color, target_rgb)))
+class ColorLearningOptimizer:
+    def __init__(self, 
+                 dye_count: int,
+                 max_well_volume: int = 200,
+                 step: int = 1,
+                 tolerance: int = 30,
+                 min_required_volume: int = 20,
+                 optimization_mode: str = "unmixing"  # or "random_forest"
+                ):
+        self.dye_count = dye_count
+        self.max_well_volume = max_well_volume
+        self.step = step
+        self.tolerance = tolerance
+        self.min_required_volume = min_required_volume
+        self.optimization_mode = optimization_mode
+        self.X_train = []
+        self.Y_train = []
 
-def color_distance_score(color, target_rgb, max_distance=441.7):
-    distance = calculate_distance_to_target(color, target_rgb)
-    score = 1.0 - (distance / max_distance)
-    return score ** 3
+    def reset(self):
+        self.X_train = []
+        self.Y_train = []
 
-def within_tolerance(color, target_rgb, tolerance):
-    distance = calculate_distance_to_target(color, target_rgb)
-    return distance <= tolerance
+    def add_data(self, volumes: list, measured_color: list):
+        self.X_train.append(volumes)
+        self.Y_train.append(measured_color)
 
-def random_combination(dye_count, step, max_volume):
-    vols = [0] * dye_count
-    remain = max_volume
+    def suggest_next_experiment(self, target_color: list) -> list:
+        if self.optimization_mode == "unmixing":
+            volumes = self._color_unmixing_optimize(target_color)
+        elif self.optimization_mode == "random_forest":
+            volumes = self._random_forest_optimize(target_color)
+        else:
+            raise ValueError(f"Unknown optimization mode: {self.optimization_mode}")
+        return self._apply_min_volume_constraint(volumes)
+    
+    
+    def calculate_distance(self, color: list, target_color: list) -> float:
+        return math.sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(color, target_color)))
 
-    if remain > 0 and dye_count > 0:
-        primary_dye = random.randint(0, dye_count-1)
-        min_vol = step
-        vols[primary_dye] = min_vol
-        remain -= min_vol
+    def within_tolerance(self, color: list, target_color: list) -> bool:
+        return self.calculate_distance(color, target_color) <= self.tolerance
 
-    for i in range(dye_count):
-        if remain <= 0:
-            break
-        if random.random() < 0.7:
-            possible_steps = remain // step
-            if possible_steps > 0:
-                vol = random.randint(0, possible_steps) * step
-                vols[i] += vol
-                remain -= vol
+    def _random_combination(self) -> list:
+        vols = [0] * self.dye_count
+        remain = self.max_well_volume
 
-    if remain > 0 and dye_count > 0:
-        lucky_dye = random.randint(0, dye_count-1)
-        vols[lucky_dye] += remain
+        if remain > 0 and self.dye_count > 0:
+            primary_dye = random.randint(0, self.dye_count - 1)
+            vols[primary_dye] = self.step
+            remain -= self.step
 
-    return vols
+        for i in range(self.dye_count):
+            if remain <= 0:
+                break
+            if random.random() < 0.7:
+                possible_steps = remain // self.step
+                if possible_steps > 0:
+                    vol = random.randint(0, possible_steps) * self.step
+                    vols[i] += vol
+                    remain -= vol
 
-def generate_diverse_candidates(dye_count, n_samples, existing_experiments, max_volume, step):
-    candidates = []
-    seen = set(tuple(exp) for exp in existing_experiments or [])
-    n_to_generate = n_samples
+        if remain > 0 and self.dye_count > 0:
+            lucky_dye = random.randint(0, self.dye_count - 1)
+            vols[lucky_dye] += remain
 
-    for i in range(dye_count):
-        candidate = [0] * dye_count
-        candidate[i] = max_volume
-        tuple_candidate = tuple(candidate)
-        if tuple_candidate not in seen:
-            seen.add(tuple_candidate)
-            candidates.append(candidate)
-            n_to_generate -= 1
+        return vols
 
-    if dye_count >= 2:
-        for i in range(dye_count):
-            for j in range(i+1, dye_count):
-                for ratio in [0.2, 0.5, 0.8]:
-                    candidate = [0] * dye_count
-                    candidate[i] = int(max_volume * ratio / step) * step
-                    candidate[j] = max_volume - candidate[i]
-                    tuple_candidate = tuple(candidate)
-                    if tuple_candidate not in seen:
-                        seen.add(tuple_candidate)
-                        candidates.append(candidate)
-                        n_to_generate -= 1
-                        if n_to_generate <= 0:
-                            return candidates
+    def _apply_min_volume_constraint(self, volumes: list) -> list:
+        # Remove dyes with volume below threshold
+        volumes = [v if v >= self.min_required_volume else 0 for v in volumes]
 
-    if dye_count >= 3:
-        for i in range(dye_count):
-            for j in range(i+1, dye_count):
-                for k in range(j+1, dye_count):
-                    candidate = [0] * dye_count
-                    candidate[i] = int(max_volume / 3)
-                    candidate[j] = int(max_volume / 3)
-                    candidate[k] = max_volume - candidate[i] - candidate[j]
-                    tuple_candidate = tuple(candidate)
-                    if tuple_candidate not in seen:
-                        seen.add(tuple_candidate)
-                        candidates.append(candidate)
-                        n_to_generate -= 1
-                        if n_to_generate <= 0:
-                            return candidates
+        total_vol = sum(volumes)
+        if total_vol == 0:
+            return self._random_combination()
 
-    attempts = 0
-    while n_to_generate > 0 and attempts < n_to_generate * 5:
-        attempts += 1
-        candidate = random_combination(dye_count, step, max_volume)
-        tuple_candidate = tuple(candidate)
-        if tuple_candidate not in seen:
-            seen.add(tuple_candidate)
-            candidates.append(candidate)
-            n_to_generate -= 1
+        # Rescale to total max_well_volume
+        scale = self.max_well_volume / total_vol
+        volumes = [int(v * scale) for v in volumes]
 
-    return candidates
+        diff = self.max_well_volume - sum(volumes)
+        if diff != 0:
+            max_idx = np.argmax(volumes)
+            volumes[max_idx] += diff
 
-def generate_diverse_covering_combinations(dye_count, n_combinations, max_volume, step):
-    combinations = []
-    used_dyes = set()
-    attempts = 0
-    max_attempts = 1000
+        return volumes
 
-    while len(combinations) < n_combinations and attempts < max_attempts:
-        attempts += 1
-        candidate = random_combination(dye_count, step, max_volume)
-        nonzero_indices = [i for i, v in enumerate(candidate) if v > 0]
+    def _random_forest_optimize(self, target_rgb: list) -> list:
+        if len(self.X_train) == 0:
+            random_volumes = self._random_combination()
+            return self._apply_min_volume_constraint(random_volumes)
 
-        if len(nonzero_indices) < 2:
-            continue
+        scores = np.array([self._color_distance_score(color, target_rgb) for color in self.Y_train])
+        scaler = MinMaxScaler()
+        X_train_scaled = scaler.fit_transform(self.X_train)
+        n_estimators = min(100, max(10, len(self.X_train) * 5))
+        rf = RandomForestRegressor(n_estimators=n_estimators, random_state=42)
 
-        new_dyes = set(nonzero_indices) - used_dyes
-        if new_dyes or len(combinations) == 0:
-            if not any(np.array_equal(candidate, c) for c in combinations):
-                combinations.append(candidate)
-                used_dyes.update(nonzero_indices)
+        try:
+            rf.fit(X_train_scaled, scores)
+        except Exception as e:
+            print(f"Random Forest training failed: {e}")
+            return self._random_combination()
 
-        if len(used_dyes) == dye_count:
-            break
+        candidates = [self._random_combination() for _ in range(50)]
+        X_candidates = np.array(candidates)
+        X_candidates_scaled = scaler.transform(X_candidates)
 
-    while len(combinations) < n_combinations:
-        candidate = random_combination(dye_count, step, max_volume)
-        if len([v for v in candidate if v > 0]) < 2:
-            continue
-        if not any(np.array_equal(candidate, c) for c in combinations):
-            combinations.append(candidate)
+        try:
+            predicted_scores = rf.predict(X_candidates_scaled)
+            tree_predictions = np.array([tree.predict(X_candidates_scaled) for tree in rf.estimators_])
+            uncertainties = np.var(tree_predictions, axis=0)
+            acquisition = predicted_scores + uncertainties
+            sorted_indices = np.argsort(acquisition)[::-1]
+            best = candidates[sorted_indices[0]]
+            return self._apply_min_volume_constraint(best)
 
-    return combinations
+        except Exception as e:
+            print(f"Random Forest prediction failed: {e}")
+            return self._random_combination()
 
-def random_forest_optimize_next_experiment(X_train, Y_train, target_rgb, dye_count, max_volume, step, max_iterations=11):
-    if len(X_train) == 0:
-        return random_combination(dye_count, step, max_volume)
+    def _color_distance_score(self, color, target_rgb, max_distance=441.7):
+        distance = self.calculate_distance(color, target_rgb)
+        return (1.0 - distance / max_distance) ** 3
 
-    scores = np.array([color_distance_score(color, target_rgb) for color in Y_train])
-    scaler = MinMaxScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    n_estimators = min(100, max(10, len(X_train) * 5))
+    def _color_unmixing_optimize(self, target_rgb: list) -> list:
+        if len(self.X_train) < 2:
+            random_volumes = self._random_combination()
+            return self._apply_min_volume_constraint(random_volumes)
 
-    rf = RandomForestRegressor(n_estimators=n_estimators, random_state=42)
-    try:
-        rf.fit(X_train_scaled, scores)
-    except Exception as e:
-        print(f"Random Forest training failed: {e}")
-        return random_combination(dye_count, step, max_volume)
+        X = np.array(self.X_train)
+        X_norm = np.array([row / (np.sum(row) if np.sum(row) > 0 else 1) for row in X])
+        Y = np.array(self.Y_train)
 
-    candidates = generate_diverse_candidates(dye_count, 50, X_train, max_volume, step)
-    if not candidates:
-        print("No unique candidates found, falling back to random")
-        while True:
-            new_candidate = random_combination(dye_count, step, max_volume)
-            if not any(np.array_equal(new_candidate, exp) for exp in X_train):
-                return new_candidate
+        try:
+            dye_colors = np.zeros((self.dye_count, 3))
+            for i in range(3):
+                result = lstsq(X_norm, Y[:, i], rcond=None)
+                dye_colors[:, i] = result[0]
+            dye_colors = np.clip(dye_colors, 0, 255)
 
-    X_candidates = np.array(candidates)
-    X_candidates_scaled = scaler.transform(X_candidates)
-    try:
-        predicted_scores = rf.predict(X_candidates_scaled)
-        tree_predictions = np.array([tree.predict(X_candidates_scaled) for tree in rf.estimators_])
-        uncertainties = np.var(tree_predictions, axis=0)
+            weights, _ = nnls(dye_colors, np.array(target_rgb))
+            if sum(weights) > 0:
+                weights = weights / sum(weights)
 
-        ratio = len(X_train) / max_iterations
-        exploration_weight = 2.0 if ratio < 0.3 else 1.0 if ratio < 0.7 else 0.5
+            volumes = [int(w * self.max_well_volume) for w in weights]
+            return self._apply_min_volume_constraint(volumes)
 
-        acquisition = predicted_scores + exploration_weight * uncertainties
-
-        if len(X_train) >= 3:
-            best_indices = np.argsort(scores)[-3:]
-            best_X = X_train_scaled[best_indices]
-            for best_x in best_X:
-                distances = np.sqrt(np.sum((X_candidates_scaled - best_x) ** 2, axis=1))
-                proximity_bonus = 0.3 * np.exp(-distances)
-                acquisition += proximity_bonus
-
-        sorted_indices = np.argsort(acquisition)[::-1]
-        return candidates[sorted_indices[0]]
-
-    except Exception as e:
-        print(f"Random Forest prediction failed: {e}")
-        return random_combination(dye_count, step, max_volume)
+        except Exception as e:
+            print(f"Color unmixing optimization failed: {e}")
+            return self._random_combination()
