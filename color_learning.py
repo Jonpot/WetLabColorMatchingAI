@@ -34,12 +34,14 @@ class ColorLearningOptimizer:
 
     def suggest_next_experiment(self, target_color: list) -> list:
         if self.optimization_mode == "unmixing":
-            return self._color_unmixing_optimize(target_color)
+            volumes = self._color_unmixing_optimize(target_color)
         elif self.optimization_mode == "random_forest":
-            return self._random_forest_optimize(target_color)
+            volumes = self._random_forest_optimize(target_color)
         else:
             raise ValueError(f"Unknown optimization mode: {self.optimization_mode}")
-
+        return self._apply_min_volume_constraint(volumes)
+    
+    
     def calculate_distance(self, color: list, target_color: list) -> float:
         return math.sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(color, target_color)))
 
@@ -92,7 +94,8 @@ class ColorLearningOptimizer:
 
     def _random_forest_optimize(self, target_rgb: list) -> list:
         if len(self.X_train) == 0:
-            return self._random_combination()
+            random_volumes = self._random_combination()
+            return self._apply_min_volume_constraint(random_volumes)
 
         scores = np.array([self._color_distance_score(color, target_rgb) for color in self.Y_train])
         scaler = MinMaxScaler()
@@ -129,7 +132,8 @@ class ColorLearningOptimizer:
 
     def _color_unmixing_optimize(self, target_rgb: list) -> list:
         if len(self.X_train) < 2:
-            return self._random_combination()
+            random_volumes = self._random_combination()
+            return self._apply_min_volume_constraint(random_volumes)
 
         X = np.array(self.X_train)
         X_norm = np.array([row / (np.sum(row) if np.sum(row) > 0 else 1) for row in X])
