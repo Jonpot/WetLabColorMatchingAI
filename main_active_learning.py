@@ -17,7 +17,9 @@ robot.execute_actions_on_remote()
 
 # Define dye reservoir slots and plate rows
 color_slots = ['7', '8', '9']
-plate_rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+plate = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+row = 3
+plate_rows = plate[:row]
 MAX_WELL_VOLUME = 200
 TOLERANCE = 30
 MIN_STEP = 1
@@ -37,11 +39,10 @@ optimizer = ColorLearningOptimizer(
 # --- Start Active Learning Loop ---
 
 processor = PlateProcessor()
-color_data = processor.process_image(cam_index=0, warmup=5)# Read plate color
+color_data = processor.process_image(cam_index=1, warmup=5)# Read plate color
 
 for row in plate_rows:
     print(f"Processing row {row}")
-
     # Reset optimizer for new row
     optimizer.reset()
 
@@ -77,7 +78,7 @@ for row in plate_rows:
         time.sleep(3)
 
         # Read updated plate color
-        color_data = processor.process_image(cam_index=0)
+        color_data = processor.process_image(cam_index=1)
         measured_color = color_data[row_idx][column - 1]
 
         print(f"Measured color: {measured_color}")
