@@ -7,37 +7,41 @@ from typing import Any, Dict, Optional
 import threading
 
 class OT2Manager:
-    def __init__(self, hostname: str, username: str, password: str, key_filename: str):
-        # OT2 robot connection details
-        self.hostname = hostname
-        self.username = username
-        self.password = password
-        self.key_filename = key_filename
-        
-        # Set up the SSH client and load the private key
-        self.ssh = paramiko.SSHClient()
-        self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        try:
-            self.private_key = paramiko.RSAKey.from_private_key_file(self.key_filename, password=self.password)
-        except Exception as e:
-            print(f"Error loading private key from {self.key_filename}: {e}")
-            sys.exit(1)
-        
-        try:
-            print(f"Connecting to OT2 robot at {self.hostname}...")
-            self.ssh.connect(self.hostname, username=self.username, pkey=self.private_key)
-        except Exception as e:
-            print(f"Error connecting to {self.hostname}: {e}")
-            sys.exit(1)
+    def __init__(self, hostname: str, username: str, password: str, key_filename: str, virtual_mode: bool = False) -> None:
+        self.virtual_mode = virtual_mode
+        if not self.virtual_mode:
+            # OT2 robot connection details
+            self.hostname = hostname
+            self.username = username
+            self.password = password
+            self.key_filename = key_filename
+            
+            # Set up the SSH client and load the private key
+            self.ssh = paramiko.SSHClient()
+            self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                self.private_key = paramiko.RSAKey.from_private_key_file(self.key_filename, password=self.password)
+            except Exception as e:
+                print(f"Error loading private key from {self.key_filename}: {e}")
+                sys.exit(1)
+            
+            try:
+                print(f"Connecting to OT2 robot at {self.hostname}...")
+                self.ssh.connect(self.hostname, username=self.username, pkey=self.private_key)
+            except Exception as e:
+                print(f"Error connecting to {self.hostname}: {e}")
+                sys.exit(1)
 
-        # Initialize the args file and a flag to indicate when the remote process signals completion
-        self.args = {"is_updated": False, "actions": []}
-        self.finished_flag = False
-        self._save_args_to_file("args.jsonx")
-        self._upload_file("args.jsonx")
-        self._start_robot_listener()
-        self._listen_for_completion()
+            # Initialize the args file and a flag to indicate when the remote process signals completion
+            self.args = {"is_updated": False, "actions": []}
+            self.finished_flag = False
+            self.error_flag = False
+            self._save_args_to_file("args.jsonx")
+            self._upload_file("args.jsonx")
+            self._start_robot_listener()
+            self._listen_for_completion()
         print("OT2Manager initialized and ready.")
+        input("Press Enter to continue and run the protocol...")
 
 
     def _upload_file(self, local_path: str) -> None:
@@ -92,6 +96,10 @@ class OT2Manager:
                                 if "Ready" in line:
                                     self.finished_flag = True
                                     print("Finished flag set to True")
+                                elif "Error" in line:
+                                    print("Error detected in remote process output.")
+                                    self.finished_flag = True
+                                    self.error_flag = True
                     # Exit loop if the channel is closed.
                     if channel.closed:
                         print("Remote shell channel closed.")
@@ -116,9 +124,12 @@ class OT2Manager:
         print(f"Saved args to {filename}")
 
     def _listen_for_completion(self) -> None:
-        """Wait until the remote process signals 'Ready'."""
+        """Wait until the remote process signals 'Ready'.
+        
+        ::raises RuntimeError: If an error is detected during the remote process execution.
+        """
         tries = 0
-        while not self.finished_flag:
+        while not self.finished_flag and not self.error_flag:
             tries += 1
             print(f"\rWaiting for robot to finish... [Attempt #{tries}]", end="")
             sys.stdout.flush()
@@ -127,15 +138,30 @@ class OT2Manager:
         print("Robot finished processing. Finished flag reset.")
         self.finished_flag = False
 
+        if self.error_flag:
+            print("Error detected during remote process execution.")
+            self.error_flag = False
+            raise RuntimeError("Error detected during remote process execution.")
+
     def execute_actions_on_remote(self) -> None:
         """
         Save and upload the args file and then wait for the remote process
         to signal that it is ready for new instructions.
+
+        ::raises RuntimeError: If an error is detected during the remote process execution.
         """
+        if self.virtual_mode:
+            self.args["is_updated"] = False  # Reset the update flag for the next set of actions
+            self.args["actions"] = []
+            print("Running in virtual mode. Actions not executed on remote.")
+            return  # Skip execution in virtual mode
         filename = "args.jsonx"
         self._save_args_to_file(filename)
         self._upload_file(filename)
-        self._listen_for_completion()
+        try:
+            self._listen_for_completion()
+        except RuntimeError as e:
+            raise e
 
         self.args["is_updated"] = False  # Reset the update flag for the next set of actions
         self.args["actions"] = []
@@ -152,6 +178,10 @@ class OT2Manager:
     def add_turn_off_lights_action(self) -> None:
         """Queue a turn off lights action."""
         self._add_action("turn_off_lights")
+
+    def add_calibrate_96_well_plate(self) -> None:
+        """Queue a calibrate 96 well plate action."""
+        self._add_action("calibrate_96_well_plate")
 
     def add_close_action(self) -> None:
         """Queue a close action."""
