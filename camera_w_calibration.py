@@ -10,11 +10,13 @@ class PlateProcessor:
         # UI / calibration properties
         self.points = []
         self.dragging_idx = -1
+        self.dragging_calib_idx = -1
         self.img_copy = None
         self.confirmed = False
         self.CONFIRM_BTN_TOPLEFT = None
         self.BTN_WIDTH = 140
         self.BTN_HEIGHT = 30
+        self.calibration_dots = [(50, 50), (100, 50), (150, 50), (200, 50)]
 
     # ----------------------------------------------------------------
     # ----------------------- Camera Methods --------------------------
@@ -206,40 +208,6 @@ class PlateProcessor:
                 grid[r, c, 1] = y1 + (r + 0.5) * dy   # y
         return grid
 
-    # @staticmethod
-    # def extract_rgb_values(image, centers, x_offset: int = 0, y_offset: int = 0):
-    #     """
-    #     对每个中心点取 3×3 区域 (中心 ±1 px) 的 9 个像素求平均，
-    #     返回与 centers 行列形状一致的 2-D 列表：
-    #         rgb_matrix[r][c]  →  [R, G, B]
-    #     """
-    #     h, w = image.shape[:2]
-    #     ctrs = np.asarray(centers, dtype=float)
-    #     if ctrs.ndim != 3 or ctrs.shape[-1] != 2:
-    #         raise ValueError("centers must have shape (rows, cols, 2)")
-
-    #     rows, cols = ctrs.shape[:2]
-    #     rgb_matrix = [[None for _ in range(cols)] for _ in range(rows)]
-
-    #     # 3×3 邻域：dx,dy ∈ {-1,0,1}
-    #     for r in range(rows):
-    #         for c in range(cols):
-    #             cx, cy = ctrs[r, c]
-    #             pixels = []
-    #             for dy in (-1, 0, 1):
-    #                 for dx in (-1, 0, 1):
-    #                     x = int(cx - x_offset + dx)
-    #                     y = int(cy - y_offset + dy)
-    #                     if 0 <= x < w and 0 <= y < h:
-    #                         pixels.append(image[y, x])  # BGR
-    #             if pixels:
-    #                 avg_bgr = np.mean(pixels, axis=0)
-    #                 rgb_matrix[r][c] = [int(avg_bgr[2]), int(avg_bgr[1]), int(avg_bgr[0])]
-    #             else:                                   # 极端越界情况
-    #                 rgb_matrix[r][c] = [0, 0, 0]
-
-    #     return rgb_matrix
-
     @staticmethod
     def extract_rgb_values(image, centers, x_offset: int = 0, y_offset: int = 0):
         """
@@ -284,7 +252,6 @@ class PlateProcessor:
 
         return rgb_matrix
 
-
     @staticmethod
     def compute_rgb_statistics(rgb_matrix_transposed):
         """
@@ -307,6 +274,79 @@ class PlateProcessor:
         avg_distance = np.mean(dist_matrix[np.triu_indices(len(selected_rgbs), k=1)])
         return (mean_rgb, std_rgb, max_distance, min_distance, avg_distance)
 
+    @staticmethod
+    def compute_color_correction_matrix(measured, real):
+        """
+        Compute the color correction matrix M such that:
+            Real_RGB = M * Measured_RGB
+        Parameters:
+            measured: (4, 3) array of measured RGB values (red, green, blue, white).
+            real: (4, 3) array of real RGB values (red, green, blue, white).
+        Returns:
+            M: (3, 3) color correction matrix.
+        """
+        measured = np.array(measured, dtype=np.float32).T  # Shape: (3, 4)
+        real = np.array(real, dtype=np.float32).T          # Shape: (3, 4)
+
+        # Solve for M using matrix multiplication
+        M = real @ np.linalg.pinv(measured)  # M = Real * Measured⁻¹
+        return M
+
+    @staticmethod
+    def apply_color_correction(rgb_matrix, M):
+        """
+        Apply the color correction matrix M to the RGB matrix.
+        Parameters:
+            rgb_matrix: (rows, cols, 3) array of measured RGB values for the plate.
+            M: (3, 3) color correction matrix.
+        Returns:
+            corrected_rgb_matrix: (rows, cols, 3) array of corrected RGB values.
+        """
+        # Convert rgb_matrix to a NumPy array if it's a list
+        rgb_matrix = np.array(rgb_matrix, dtype=np.float32)
+
+        rows, cols, _ = rgb_matrix.shape
+        corrected_rgb_matrix = np.empty_like(rgb_matrix, dtype=np.float32)
+
+        for r in range(rows):
+            for c in range(cols):
+                measured_rgb = rgb_matrix[r, c]
+                corrected_rgb = M @ measured_rgb  # Apply the transformation
+                corrected_rgb_matrix[r, c] = np.clip(corrected_rgb, 0, 255)  # Clip to valid range
+
+        return corrected_rgb_matrix.astype(np.uint8)
+
+    def calibrate_rgb_matrix(self, rgb_matrix, calibration_dots, resized_img):
+        """
+        Calibrate the RGB matrix using the calibration dots.
+        Parameters:
+            rgb_matrix: (rows, cols, 3) array of measured RGB values for the plate.
+            calibration_dots: List of (x, y) positions of the calibration dots.
+            resized_img: The resized image from which RGB values are extracted.
+        Returns:
+            corrected_rgb_matrix: (rows, cols, 3) array of calibrated RGB values.
+        """
+        # Real RGB values for the calibration dots
+        real_rgb = [
+            [255, 0, 0],    # Red
+            [0, 255, 0],    # Green
+            [0, 0, 255],    # Blue
+            [255, 255, 255] # White
+        ]
+
+        # Extract measured RGB values from the calibration dots
+        measured_rgb = []
+        for x, y in calibration_dots:
+            b, g, r = resized_img[int(y), int(x)]  # Extract BGR from the image
+            measured_rgb.append([r, g, b])        # Convert to RGB
+
+        # Compute the color correction matrix
+        M = self.compute_color_correction_matrix(measured_rgb, real_rgb)
+
+        # Apply the color correction matrix to the RGB matrix
+        corrected_rgb_matrix = self.apply_color_correction(rgb_matrix, M)
+        return corrected_rgb_matrix
+
     # ----------------------------------------------------------------
     # --------------------- Calibration UI ----------------------------
     # ----------------------------------------------------------------
@@ -317,11 +357,8 @@ class PlateProcessor:
           • corner handles & index
           • bounding rectangle
           • sample well centres
+          • calibration dots for colors
           • instructions & Confirm button
-
-        Works whether self.get_well_centers_boxed_grid returns a flat list
-        or an (rows, cols, 2) NumPy array – we reshape to (-1, 2) before
-        drawing.
         """
         h, w = disp.shape[:2]
 
@@ -330,6 +367,7 @@ class PlateProcessor:
         # ------------------------------------------------------------------
         instructions = [
             "Drag corners to define plate region",
+            "Drag dots to define calibration colors",
             "Use trackbar: (0=12,1=24,2=48,3=96)",
             "Click 'Confirm' or press 'c' to finalize",
             "Press ESC to cancel"
@@ -373,7 +411,16 @@ class PlateProcessor:
                 cv2.circle(disp, (int(cx), int(cy)), 6, (0, 0, 255), -1)
 
         # ------------------------------------------------------------------
-        # 4)  Confirm button
+        # 4)  Calibration dots
+        # ------------------------------------------------------------------
+        calibration_colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (255, 255, 255)]  # Red, Green, Blue, White
+        for i, (pt, color) in enumerate(zip(self.calibration_dots, calibration_colors)):
+            cv2.circle(disp, pt, 10, color, -1)
+            cv2.putText(disp, f"C{i+1}", (pt[0] + 10, pt[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
+        # ------------------------------------------------------------------
+        # 5)  Confirm button
         # ------------------------------------------------------------------
         self.CONFIRM_BTN_TOPLEFT = (w - self.BTN_WIDTH - 10,
                                     h - self.BTN_HEIGHT - 10)
@@ -396,8 +443,8 @@ class PlateProcessor:
 
     def mouse_callback(self, event, x, y, flags, param):
         """
-        Mouse event callback for dragging corners or clicking the 'Confirm' button.
-        Also clamps dragged corners to remain within image boundaries.
+        Mouse event callback for dragging corners or calibration dots.
+        Also clamps dragged points to remain within image boundaries.
         """
         h, w = self.img_copy.shape[:2]
 
@@ -412,29 +459,43 @@ class PlateProcessor:
 
             # Check if near an existing corner
             for i, pt in enumerate(self.points):
-                # If mouse is within 10px of a corner, pick it
                 if np.hypot(x - pt[0], y - pt[1]) < 10:
                     self.dragging_idx = i
                     return
 
-        elif event == cv2.EVENT_MOUSEMOVE and self.dragging_idx != -1:
-            # Clamp corners inside the image
-            clamped_x = max(0, min(x, w - 1))
-            clamped_y = max(0, min(y, h - 1))
-            self.points[self.dragging_idx] = (clamped_x, clamped_y)
-            self.update_windows()
+            # Check if near a calibration dot
+            for i, pt in enumerate(self.calibration_dots):
+                if np.hypot(x - pt[0], y - pt[1]) < 10:
+                    self.dragging_calib_idx = i
+                    return
+
+        elif event == cv2.EVENT_MOUSEMOVE:
+            if self.dragging_idx != -1:
+                # Dragging a corner
+                clamped_x = max(0, min(x, w - 1))
+                clamped_y = max(0, min(y, h - 1))
+                self.points[self.dragging_idx] = (clamped_x, clamped_y)
+                self.update_windows()
+            elif self.dragging_calib_idx != -1:
+                # Dragging a calibration dot
+                clamped_x = max(0, min(x, w - 1))
+                clamped_y = max(0, min(y, h - 1))
+                self.calibration_dots[self.dragging_calib_idx] = (clamped_x, clamped_y)
+                self.update_windows()
 
         elif event == cv2.EVENT_LBUTTONUP:
             self.dragging_idx = -1
+            self.dragging_calib_idx = -1
 
     def run_calibration_ui(self, resized_img):
         """
         Launches the calibration window. The user can:
         - Drag each of the 4 corners
+        - Drag calibration dots for color calibration
         - Use the trackbar for plate type
         - Click 'Confirm' or press 'c' to finalize
         - Press ESC to cancel
-        Returns a dict with {'rectangle': {...}, 'plate_type': ...},
+        Returns a dict with {'rectangle': {...}, 'plate_type': ..., 'calibration_dots': [...]},
         or None if canceled or timed out (3 mins).
         """
         self.img_copy = resized_img.copy()
@@ -448,8 +509,18 @@ class PlateProcessor:
             (w - margin_w, h - margin_h),
             (margin_w, h - margin_h),
         ]
+
+        # Set default calibration dots (near corners)
+        self.calibration_dots = [
+            (margin_w + 20, margin_h + 20),  # Red
+            (w - margin_w - 20, margin_h + 20),  # Green
+            (w - margin_w - 20, h - margin_h - 20),  # Blue
+            (margin_w + 20, h - margin_h - 20),  # White/Black
+        ]
+
         self.confirmed = False
         self.dragging_idx = -1
+        self.dragging_calib_idx = -1
 
         cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
         cv2.setMouseCallback("Calibration", self.mouse_callback)
@@ -458,6 +529,7 @@ class PlateProcessor:
 
         print("=== Calibration UI ===")
         print(" - Drag corners to match your plate edges.")
+        print(" - Drag dots to define calibration colors.")
         print(" - Trackbar sets plate type (12,24,48,96).")
         print(" - Click 'Confirm' or press 'c' to finalize.")
         print(" - ESC or 3-minute timeout to cancel.\n")
@@ -468,7 +540,6 @@ class PlateProcessor:
         while True:
             key = cv2.waitKey(20) & 0xFF
 
-            # If 3 minutes pass without confirmation, cancel calibration
             if time.time() - start_time > TIMEOUT_SECONDS:
                 print("Calibration timed out. No confirmation within 3 minutes.")
                 self.confirmed = False
@@ -479,7 +550,6 @@ class PlateProcessor:
                 self.confirmed = False
                 break
             elif key == ord('c'):
-                # Press 'c' to confirm
                 self.confirmed = True
                 break
 
@@ -495,18 +565,13 @@ class PlateProcessor:
         cv2.destroyWindow("Calibration")
 
         if not self.confirmed:
-            # Return None if user canceled or timed out
             return None
 
         return {
             "rectangle": {"x1": rx1, "y1": ry1, "x2": rx2, "y2": ry2},
-            "plate_type": plate_type
+            "plate_type": plate_type,
+            "calibration_dots": self.calibration_dots
         }
-
-
-    # ----------------------------------------------------------------
-    # ---------------------- Calibration Methods ----------------------
-    # ----------------------------------------------------------------
 
     def calibrate_from_file(self, image_path, calib_filename="calibration.json"):
         """
@@ -571,12 +636,12 @@ class PlateProcessor:
             warmup: int = 10,
             image_path: str | None = None,
             calib_filename: str = "calibration.json",
-            snapshot_file: str = "snapshot.jpg" 
-    ) -> np.ndarray:
+            snapshot_file: str = "snapshot.jpg"
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         • Always capture a fresh frame into SNAPSHOT_FILE (constant name).
         • If calibration data is missing, launch the UI once, then reuse it.
-        • Return a 3 × N RGB matrix for the current plate.
+        • Return a tuple: (raw_rgb_matrix, corrected_rgb_matrix).
         """
 
         # ------------------------------------------------------------------
@@ -622,10 +687,17 @@ class PlateProcessor:
         centers = self.get_well_centers_boxed_grid(
             rx1, ry1, rx2, ry2, plate_type
         )
-        rgb_matrix = self.extract_rgb_values(
+        raw_rgb_matrix = self.extract_rgb_values(
             resized_img, centers, x_offset=rx1, y_offset=ry1
         )
-        return rgb_matrix
+
+        # ------------------------------------------------------------------
+        # 4)  Calibrate the RGB matrix
+        # ------------------------------------------------------------------
+        calibration_dots = calib_data["calibration_dots"]
+        corrected_rgb_matrix = self.calibrate_rgb_matrix(raw_rgb_matrix, calibration_dots, resized_img)
+
+        return raw_rgb_matrix, corrected_rgb_matrix
 
 
 

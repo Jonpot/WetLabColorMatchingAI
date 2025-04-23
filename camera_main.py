@@ -4,12 +4,13 @@ import numpy as np
 
 processor = PlateProcessor()
 
-# --- one‑liner: capture → (auto‑)calibrate → RGB cube -----------------
-rgb_cube = processor.process_image(cam_index=1, warmup=15)    # e.g. (8,12,3)
-print(rgb_cube[0][0], rgb_cube[0][1])
+# Capture and process the image
+raw_rgb_cube, corrected_rgb_cube = processor.process_image(cam_index=0, warmup=15)  # e.g., (8, 12, 3)
 
-# # Optional statistics
-# stats = processor.compute_rgb_statistics(rgb_matrix)
-# if stats:
-#     mean_rgb, std_rgb, max_d, min_d, avg_d = stats
-#     print(mean_rgb, std_rgb)
+# Example: Access RGB values for a specific well (e.g., row 0, column 0)
+row, col = 0, 2
+raw_rgb = raw_rgb_cube[row][col]
+corrected_rgb = corrected_rgb_cube[row][col]
+
+print(f"Raw RGB values for well ({row}, {col}): {raw_rgb}")
+print(f"Corrected RGB values for well ({row}, {col}): {corrected_rgb}")
