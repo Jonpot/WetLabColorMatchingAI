@@ -3,6 +3,7 @@ import time
 import numpy as np
 import json
 import os
+from pathlib import Path
 
 class PlateProcessor:
     def __init__(self):
@@ -47,38 +48,115 @@ class PlateProcessor:
             current_val = cap.get(prop)
             print(f"Set property {prop} to {value}. Current value: {current_val}")
 
+    # ---------------------------------------------------------------------------
+    # Helper: simple gray-world white balance + contrast stretch
+    # ---------------------------------------------------------------------------
+    def colour_correct(img: np.ndarray) -> np.ndarray:
+        """
+        1) Gray-world WB  – scales R,G,B so their means are equal
+        2) 1 % contrast stretch per channel
+        """
+        # --- gray-world WB ------------------------------------------------------
+        avg_b, avg_g, avg_r = img.mean(axis=(0, 1))
+        avg = (avg_b + avg_g + avg_r) / 3.0
+        gain = np.array([avg / avg_b, avg / avg_g, avg / avg_r])
+        img_corr = (img * gain).clip(0, 255).astype(np.uint8)
+
+        # --- contrast stretch ---------------------------------------------------
+        out = np.empty_like(img_corr)
+        for c in range(3):
+            lo, hi = np.percentile(img_corr[..., c], (1, 99))
+            scale = 255.0 / max(hi - lo, 1)
+            out[..., c] = np.clip((img_corr[..., c] - lo) * scale, 0, 255)
+        return out
+
+    # ---------------------------------------------------------------------------
+    # High-quality snapshot + colour correction
+    # ---------------------------------------------------------------------------
+     # -----------------------------------------------------------------------
+    # High-quality snapshot (added optional exposure / gain controls)
+    # -----------------------------------------------------------------------
     @staticmethod
-    def take_snapshot(cam_index=0, save_path="snapshot.jpg", warmup_frames=10, properties=None):
-        """
-        Open the specified camera (DirectShow on Windows), enable auto white balance,
-        apply camera properties, discard warmup frames, capture & save a snapshot.
+    def take_snapshot(
+        cam_index: int = 0,
+        save_path: str = "snapshot.jpg",
+        *,
+        warmup_frames: int = 15,
+        burst: int = 5,                       # number of frames to average
+        resolution: tuple[int, int] | None = (1600, 1200),
+        auto_exposure: bool = True,           # keep camera AE unless you set exposure/gain
+        exposure: float | None = None,        # manual exposure (UVC: usually negative; smaller = brighter)
+        gain: float | None = None,            # manual analog gain / ISO
+        colour_correct_img: bool = True,      # apply gray-world + contrast stretch
+        properties: dict[int, float] | None = None,  # extra cv2.CAP_PROP_* overrides
+    ) -> str:
 
-        Returns the path where the snapshot is saved.
-        """
+        # ---------- simple gray-world white balance + 1 % contrast stretch ----------
+        def colour_correct(img: np.ndarray) -> np.ndarray:
+            b, g, r = img.mean(axis=(0, 1))
+            avg = (b + g + r) / 3.0
+            gain_vec = np.array([avg / b, avg / g, avg / r])
+            balanced = (img * gain_vec).clip(0, 255).astype(np.uint8)
+
+            out = np.empty_like(balanced)
+            for c in range(3):
+                lo, hi = np.percentile(balanced[..., c], (1, 99))
+                scale = 255.0 / max(hi - lo, 1)
+                out[..., c] = np.clip((balanced[..., c] - lo) * scale, 0, 255)
+            return out
+        # ---------------------------------------------------------------------------
+
         cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-        # Enable auto white balance
-        cap.set(cv2.CAP_PROP_AUTO_WB, 1)
-        print("Auto white balance enabled:", cap.get(cv2.CAP_PROP_AUTO_WB))
 
+        # --- force resolution if supplied -----------------------------------------
+        if resolution:
+            w, h = resolution
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  w)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
+            time.sleep(0.2)                      # allow driver to switch mode
+
+        # --- exposure / gain control ----------------------------------------------
+        # UVC: 0.75 = auto, 0.25 = manual
+        if auto_exposure and exposure is None and gain is None:
+            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)   # keep auto mode
+        else:
+            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)   # switch to manual
+            if exposure is not None:
+                cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
+            if gain is not None:
+                cap.set(cv2.CAP_PROP_GAIN, gain)
+
+        # --- apply any extra properties -------------------------------------------
         if properties:
             PlateProcessor.set_camera_properties(cap, properties)
 
-        # Discard several frames for warming up
-        for i in range(warmup_frames):
-            ret, _ = cap.read()
-            if not ret:
-                print("Warning: Warm-up frame not captured.")
-            time.sleep(0.1)
+        # --- sensor warm-up --------------------------------------------------------
+        for _ in range(warmup_frames):
+            cap.read()
+            time.sleep(0.05)
 
-        # Capture the final frame
-        ret, frame = cap.read()
-        if ret:
-            cv2.imwrite(save_path, frame)
-            print(f"Snapshot taken and saved as '{save_path}'")
-        else:
-            print("Failed to capture a snapshot.")
+        # --- burst capture & averaging --------------------------------------------
+        acc = None
+        for _ in range(max(burst, 1)):
+            ret, frm = cap.read()
+            if not ret:
+                raise RuntimeError("Failed to read frame from camera.")
+            acc = frm.astype(np.float32) if acc is None else acc + frm
+            time.sleep(0.03)
+
+        frame = (acc / burst).astype(np.uint8)
         cap.release()
+
+        # --- optional colour correction -------------------------------------------
+        if colour_correct_img:
+            frame = colour_correct(frame)
+
+        # --- save to disk ----------------------------------------------------------
+        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(save_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        print(f"[Snapshot] {frame.shape[1]}×{frame.shape[0]} saved → {save_path}")
         return save_path
+
 
     # ----------------------------------------------------------------
     # -------------------- Utility / Image Methods --------------------
@@ -87,13 +165,14 @@ class PlateProcessor:
     @staticmethod
     def resize_to_fit(img, max_width=1280, max_height=720):
         """
-        Resize 'img' so it does not exceed max_width or max_height,
-        preserving aspect ratio. Returns (resized_img, scale_factor).
+        *** RESIZE DISABLED ***
+        Originally returned a scaled copy and scale factor.
         """
-        h, w = img.shape[:2]
-        scale = min(max_width / w, max_height / h, 1.0)
-        resized_img = cv2.resize(img, (int(w * scale), int(h * scale)))
-        return resized_img, scale
+        # h, w = img.shape[:2]
+        # scale = min(max_width / w, max_height / h, 1.0)
+        # resized = cv2.resize(img, (int(w * scale), int(h * scale)))
+        # return resized, scale
+        return img, 1.0  # full-resolution passthrough
 
     @staticmethod
     def plate_from_trackbar(val):
@@ -106,50 +185,105 @@ class PlateProcessor:
     @staticmethod
     def get_well_centers_boxed_grid(x1, y1, x2, y2, plate_type="96"):
         """
-        Compute the (x, y) center coordinates for each well in the specified bounding box.
-        Plate types can be "12", "24", "48", or "96".
+        Return a NumPy array shaped  (rows, cols, 2) containing the
+        (x, y) centre coordinates for every well inside the rectangle.
+
+        Plate layouts:
+            "12" →  8 rows × 12 cols
+            "24" →  4 rows ×  6 cols
+            "48" →  6 rows ×  8 cols
+            "96" →  8 rows × 12 cols
         """
         layouts = {"12": (8, 12), "24": (4, 6), "48": (6, 8), "96": (8, 12)}
         rows, cols = layouts.get(str(plate_type), layouts["96"])
-        width = x2 - x1
-        height = y2 - y1
-        step_x = width / cols
-        step_y = height / rows
-        centers = []
-        for i in range(rows):
-            for j in range(cols):
-                cx = int(x1 + (j + 0.5) * step_x)
-                cy = int(y1 + (i + 0.5) * step_y)
-                centers.append((cx, cy))
-        return centers
+
+        dx, dy = (x2 - x1) / cols, (y2 - y1) / rows
+        grid = np.empty((rows, cols, 2), dtype=float)
+
+        for r in range(rows):
+            for c in range(cols):
+                grid[r, c, 0] = x1 + (c + 0.5) * dx   # x
+                grid[r, c, 1] = y1 + (r + 0.5) * dy   # y
+        return grid
+
+    # @staticmethod
+    # def extract_rgb_values(image, centers, x_offset: int = 0, y_offset: int = 0):
+    #     """
+    #     对每个中心点取 3×3 区域 (中心 ±1 px) 的 9 个像素求平均，
+    #     返回与 centers 行列形状一致的 2-D 列表：
+    #         rgb_matrix[r][c]  →  [R, G, B]
+    #     """
+    #     h, w = image.shape[:2]
+    #     ctrs = np.asarray(centers, dtype=float)
+    #     if ctrs.ndim != 3 or ctrs.shape[-1] != 2:
+    #         raise ValueError("centers must have shape (rows, cols, 2)")
+
+    #     rows, cols = ctrs.shape[:2]
+    #     rgb_matrix = [[None for _ in range(cols)] for _ in range(rows)]
+
+    #     # 3×3 邻域：dx,dy ∈ {-1,0,1}
+    #     for r in range(rows):
+    #         for c in range(cols):
+    #             cx, cy = ctrs[r, c]
+    #             pixels = []
+    #             for dy in (-1, 0, 1):
+    #                 for dx in (-1, 0, 1):
+    #                     x = int(cx - x_offset + dx)
+    #                     y = int(cy - y_offset + dy)
+    #                     if 0 <= x < w and 0 <= y < h:
+    #                         pixels.append(image[y, x])  # BGR
+    #             if pixels:
+    #                 avg_bgr = np.mean(pixels, axis=0)
+    #                 rgb_matrix[r][c] = [int(avg_bgr[2]), int(avg_bgr[1]), int(avg_bgr[0])]
+    #             else:                                   # 极端越界情况
+    #                 rgb_matrix[r][c] = [0, 0, 0]
+
+    #     return rgb_matrix
 
     @staticmethod
-    def extract_rgb_values(image, centers, x_offset=0, y_offset=0):
+    def extract_rgb_values(image, centers, x_offset: int = 0, y_offset: int = 0):
         """
-        For each center (cx, cy), sample the color in a small 5-pixel region
-        (the center + 4-connected neighbors). Compute the average BGR->RGB
-        and return a (3 x N) matrix (rows = R/G/B, columns = wells).
+        Sample **only the exact centre pixel** of each well and return a
+        2-D Python list with the same (rows, cols) shape as *centers*:
+
+            rgb_matrix[row][col]  →  [R, G, B]
+
+        Parameters
+        ----------
+        image : np.ndarray
+            BGR image from OpenCV.
+        centers : (rows, cols, 2) array-like
+            Grid of well centres; last dimension is (x, y).
+        x_offset, y_offset : int, optional
+            Subtract these values from every centre coordinate before lookup
+            (useful if *centers* were generated relative to a ROI).
         """
         h, w = image.shape[:2]
-        rgb_values = []
-        for cx, cy in centers:
-            local_cx = cx - x_offset
-            local_cy = cy - y_offset
-            pixels = []
-            for dx, dy in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]:
-                x = local_cx + dx
-                y = local_cy + dy
+
+        ctrs = np.asarray(centers, dtype=float)
+        if ctrs.ndim != 3 or ctrs.shape[-1] != 2:
+            raise ValueError("centers must have shape (rows, cols, 2)")
+
+        rows, cols = ctrs.shape[:2]
+        rgb_matrix: list[list[list[int]]] = [
+            [None for _ in range(cols)] for _ in range(rows)
+        ]
+
+        for r in range(rows):
+            for c in range(cols):
+                cx, cy = ctrs[r, c]
+                x = int(cx - x_offset)
+                y = int(cy - y_offset)
+
+                # bounds check
                 if 0 <= x < w and 0 <= y < h:
-                    bgr = image[y, x]
-                    pixels.append(bgr)
-            if pixels:
-                avg_bgr = np.mean(pixels, axis=0)
-                # Convert from BGR to RGB
-                rgb_values.append([avg_bgr[2], avg_bgr[1], avg_bgr[0]])
-            else:
-                rgb_values.append([0, 0, 0])
-        rgb_matrix = np.array(rgb_values).T  # shape: (3, N)
+                    b, g, r_val = image[y, x]      # BGR order in OpenCV
+                    rgb_matrix[r][c] = [int(r_val), int(g), int(b)]
+                else:
+                    rgb_matrix[r][c] = [0, 0, 0]   # fallback for out-of-bounds
+
         return rgb_matrix
+
 
     @staticmethod
     def compute_rgb_statistics(rgb_matrix_transposed):
@@ -179,56 +313,76 @@ class PlateProcessor:
 
     def draw_ui(self, disp):
         """
-        Draw corner points, bounding lines, well centers, a Confirm button,
-        and text instructions on the display image.
+        Overlay the calibration UI on *disp*:
+          • corner handles & index
+          • bounding rectangle
+          • sample well centres
+          • instructions & Confirm button
+
+        Works whether self.get_well_centers_boxed_grid returns a flat list
+        or an (rows, cols, 2) NumPy array – we reshape to (-1, 2) before
+        drawing.
         """
         h, w = disp.shape[:2]
 
-        # Draw instructions at the top-left
+        # ------------------------------------------------------------------
+        # 1)  Instructions
+        # ------------------------------------------------------------------
         instructions = [
             "Drag corners to define plate region",
             "Use trackbar: (0=12,1=24,2=48,3=96)",
             "Click 'Confirm' or press 'c' to finalize",
             "Press ESC to cancel"
         ]
-        y_offset = 25
-        for line in instructions:
-            cv2.putText(disp, line, (10, y_offset),
+        y_off = 25
+        for txt in instructions:
+            cv2.putText(disp, txt, (10, y_off),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-            y_offset += 30
+            y_off += 30
 
-        # Draw corner points and numbering
+        # ------------------------------------------------------------------
+        # 2)  Corner handles
+        # ------------------------------------------------------------------
         for i, pt in enumerate(self.points):
-            cv2.circle(disp, pt, 5, (0, 0, 255), -1)
-            cv2.putText(disp, f"{i+1}", (pt[0]+5, pt[1]-5),
+            cv2.circle(disp, pt, 15, (0, 0, 255), -1)
+            cv2.putText(disp, f"{i+1}", (pt[0] + 5, pt[1] - 5),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
 
-        # If 4 points, draw lines and show sample well centers
+        # ------------------------------------------------------------------
+        # 3)  Rectangle & sample well centres
+        # ------------------------------------------------------------------
         if len(self.points) == 4:
+            # lines between corners
             for i in range(4):
                 cv2.line(disp, self.points[i],
                          self.points[(i + 1) % 4], (0, 255, 0), 2)
-            xs = [pt[0] for pt in self.points]
-            ys = [pt[1] for pt in self.points]
+
+            xs = [p[0] for p in self.points]
+            ys = [p[1] for p in self.points]
             rx1, ry1, rx2, ry2 = min(xs), min(ys), max(xs), max(ys)
 
-            # Draw bounding rectangle
             cv2.rectangle(disp, (rx1, ry1), (rx2, ry2), (255, 0, 0), 1)
 
-            # Draw well centers
-            plate_val = cv2.getTrackbarPos("Plate", "Calibration")
+            plate_val  = cv2.getTrackbarPos("Plate", "Calibration")
             plate_type = self.plate_from_trackbar(plate_val)
-            centers = self.get_well_centers_boxed_grid(rx1, ry1, rx2, ry2, plate_type)
-            for (cx, cy) in centers:
-                cv2.circle(disp, (cx, cy), 3, (0, 0, 255), -1)
+            centres    = self.get_well_centers_boxed_grid(rx1, ry1, rx2, ry2,
+                                                          plate_type)
 
-        # Draw confirm button in bottom-right
-        self.CONFIRM_BTN_TOPLEFT = (w - self.BTN_WIDTH - 10, h - self.BTN_HEIGHT - 10)
+            # ── FLATTEN grid to iterate as (cx, cy) pairs ────────────────
+            for cx, cy in np.asarray(centres).reshape(-1, 2):
+                cv2.circle(disp, (int(cx), int(cy)), 6, (0, 0, 255), -1)
+
+        # ------------------------------------------------------------------
+        # 4)  Confirm button
+        # ------------------------------------------------------------------
+        self.CONFIRM_BTN_TOPLEFT = (w - self.BTN_WIDTH - 10,
+                                    h - self.BTN_HEIGHT - 10)
         bx, by = self.CONFIRM_BTN_TOPLEFT
         cv2.rectangle(disp, (bx, by), (bx + self.BTN_WIDTH, by + self.BTN_HEIGHT),
                       (50, 205, 50), -1)
         cv2.putText(disp, "Confirm", (bx + 10, by + self.BTN_HEIGHT - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
         return disp
 
     def update_windows(self):
