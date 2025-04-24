@@ -39,7 +39,10 @@ def srgb2lin(s: np.ndarray) -> np.ndarray:
 
 def lin2srgb(l: np.ndarray) -> np.ndarray:
     """linear 0-1 → 8-bit sRGB."""
-    s = np.where(l <= 0.0031308, 12.92 * l, 1.055 * (l ** (1 / 2.4)) - 0.055)
+    l = np.clip(l, 0.0, 1.0)          # ← add this line
+    s = np.where(l <= 0.0031308,
+                 12.92 * l,
+                 1.055 * np.power(l, 1/2.4) - 0.055)
     return np.clip(s * 255, 0, 255)
 
 # ═════════════════════════════ PlateProcessor ═════════════════════════════
@@ -396,13 +399,6 @@ class PlateProcessor:
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════
 if __name__ == "__main__":
-    # ap = argparse.ArgumentParser()
-    # ap.add_argument("--cam", type=int, default=1,
-    #                 help="camera index for cv2.VideoCapture()")
-    # ap.add_argument("--recalib", action="store_true",
-    #                 help="force calibration UI even if JSON exists")
-    # args = ap.parse_args()
-
-    corr = PlateProcessor().process_image(cam_index=1,
-                                          force_ui=True)
+    
+    corr = PlateProcessor().process_image(cam_index=1, force_ui=False)
     print("First corrected RGB (row 0):", corr[0])
