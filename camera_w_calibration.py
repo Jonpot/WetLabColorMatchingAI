@@ -1,703 +1,172 @@
-import cv2
-import time
+#!/usr/bin/env python3
+# coding: utf-8
+"""
+camera_color24.py  –  24-patch ColorChecker calibration
+改动：
+  • avg_rgb：11×11 trimmed-mean 抽样
+  • 二阶 Root-Polynomial CCM（10 维）
+  • 24 色卡点：左半 raw / 右半 corr / 右侧 Macbeth 参考
+"""
+
+from __future__ import annotations
+import cv2, time, json, os, argparse
 import numpy as np
-import json
-import os
 from pathlib import Path
 
+WIN = "Calibration"
+
+# -------- Macbeth 24 参考色 ------------------------------------------------
+MACBETH_24_BGR = [
+    ( 68,  82,115),(130,150,194),(157,122, 98),( 67,108, 87),
+    (177,128,133),(170,189,103),( 44,126,214),(166, 91, 80),
+    ( 99,  90,193),(108, 60, 94),( 64,188,157),( 46,163,224),
+    (150, 61, 56),( 73,148, 70),( 60, 54,175),( 31,199,231),
+    (149, 86,187),(161,133,  8),(242,243,242),(200,200,200),
+    (160,160,160),(121,122,122),( 85, 85, 85),( 52, 52, 52)]
+MACBETH_24_RGB = np.array([[b,g,r] for r,g,b in MACBETH_24_BGR], np.float32)
+
+# ---------- γ helpers -----------------------------------------------------
+def srgb2lin(s):
+    s = s/255.0
+    return np.where(s<=0.04045, s/12.92, ((s+0.055)/1.055)**2.4)
+def lin2srgb(l):
+    s = np.where(l<=0.0031308, 12.92*l, 1.055*l**(1/2.4)-0.055)
+    return np.clip(s*255, 0, 255)
+
+# ══════════════════════  PlateProcessor  ══════════════════════════════════
 class PlateProcessor:
     def __init__(self):
-        # UI / calibration properties
-        self.points = []
-        self.dragging_idx = -1
-        self.dragging_calib_idx = -1
-        self.img_copy = None
-        self.confirmed = False
-        self.CONFIRM_BTN_TOPLEFT = None
-        self.BTN_WIDTH = 140
-        self.BTN_HEIGHT = 30
-        self.calibration_dots = [(50, 50), (100, 50), (150, 50), (200, 50)]
+        self.pts, self.cpts = [], []
+        self.drag_idx = self.drag_cidx = -1
+        self.img_copy = None; self.confirmed=False
+        self.btnTL=None; self.BW,self.BH=140,30
 
-    # ----------------------------------------------------------------
-    # ----------------------- Camera Methods --------------------------
-    # ----------------------------------------------------------------
-
+    # ---------- camera ----------------------------------------------------
     @staticmethod
-    def list_cameras(max_tested=10):
-        """
-        Check camera indices [0..max_tested-1] using the DirectShow backend.
-        Returns a list of valid camera indices.
-        """
-        valid_indices = []
-        for idx in range(max_tested):
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
-                    valid_indices.append(idx)
-                cap.release()
-        return valid_indices
-
-    @staticmethod
-    def set_camera_properties(cap, properties):
-        """
-        Set camera properties (e.g., resolution) via a dictionary:
-        { cv2.CAP_PROP_FRAME_WIDTH: 1920,
-          cv2.CAP_PROP_FRAME_HEIGHT: 1080, ... }
-        """
-        for prop, value in properties.items():
-            cap.set(prop, value)
-            current_val = cap.get(prop)
-            print(f"Set property {prop} to {value}. Current value: {current_val}")
-
-    # ---------------------------------------------------------------------------
-    # Helper: simple gray-world white balance + contrast stretch
-    # ---------------------------------------------------------------------------
-    def colour_correct(img: np.ndarray) -> np.ndarray:
-        """
-        1) Gray-world WB  – scales R,G,B so their means are equal
-        2) 1 % contrast stretch per channel
-        """
-        # --- gray-world WB ------------------------------------------------------
-        avg_b, avg_g, avg_r = img.mean(axis=(0, 1))
-        avg = (avg_b + avg_g + avg_r) / 3.0
-        gain = np.array([avg / avg_b, avg / avg_g, avg / avg_r])
-        img_corr = (img * gain).clip(0, 255).astype(np.uint8)
-
-        # --- contrast stretch ---------------------------------------------------
-        out = np.empty_like(img_corr)
-        for c in range(3):
-            lo, hi = np.percentile(img_corr[..., c], (1, 99))
-            scale = 255.0 / max(hi - lo, 1)
-            out[..., c] = np.clip((img_corr[..., c] - lo) * scale, 0, 255)
-        return out
-
-    # ---------------------------------------------------------------------------
-    # High-quality snapshot + colour correction
-    # ---------------------------------------------------------------------------
-     # -----------------------------------------------------------------------
-    # High-quality snapshot (added optional exposure / gain controls)
-    # -----------------------------------------------------------------------
-    @staticmethod
-    def take_snapshot(
-        cam_index: int = 0,
-        save_path: str = "snapshot.jpg",
-        *,
-        warmup_frames: int = 15,
-        burst: int = 5,                       # number of frames to average
-        resolution: tuple[int, int] | None = (1600, 1200),
-        auto_exposure: bool = True,           # keep camera AE unless you set exposure/gain
-        exposure: float | None = None,        # manual exposure (UVC: usually negative; smaller = brighter)
-        gain: float | None = None,            # manual analog gain / ISO
-        colour_correct_img: bool = True,      # apply gray-world + contrast stretch
-        properties: dict[int, float] | None = None,  # extra cv2.CAP_PROP_* overrides
-    ) -> str:
-
-        # ---------- simple gray-world white balance + 1 % contrast stretch ----------
-        def colour_correct(img: np.ndarray) -> np.ndarray:
-            b, g, r = img.mean(axis=(0, 1))
-            avg = (b + g + r) / 3.0
-            gain_vec = np.array([avg / b, avg / g, avg / r])
-            balanced = (img * gain_vec).clip(0, 255).astype(np.uint8)
-
-            out = np.empty_like(balanced)
-            for c in range(3):
-                lo, hi = np.percentile(balanced[..., c], (1, 99))
-                scale = 255.0 / max(hi - lo, 1)
-                out[..., c] = np.clip((balanced[..., c] - lo) * scale, 0, 255)
-            return out
-        # ---------------------------------------------------------------------------
-
-        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-
-        # --- force resolution if supplied -----------------------------------------
-        if resolution:
-            w, h = resolution
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  w)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-            time.sleep(0.2)                      # allow driver to switch mode
-
-        # --- exposure / gain control ----------------------------------------------
-        # UVC: 0.75 = auto, 0.25 = manual
-        if auto_exposure and exposure is None and gain is None:
-            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)   # keep auto mode
-        else:
-            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)   # switch to manual
-            if exposure is not None:
-                cap.set(cv2.CAP_PROP_EXPOSURE, exposure)
-            if gain is not None:
-                cap.set(cv2.CAP_PROP_GAIN, gain)
-
-        # --- apply any extra properties -------------------------------------------
-        if properties:
-            PlateProcessor.set_camera_properties(cap, properties)
-
-        # --- sensor warm-up --------------------------------------------------------
-        for _ in range(warmup_frames):
-            cap.read()
-            time.sleep(0.05)
-
-        # --- burst capture & averaging --------------------------------------------
-        acc = None
-        for _ in range(max(burst, 1)):
-            ret, frm = cap.read()
-            if not ret:
-                raise RuntimeError("Failed to read frame from camera.")
-            acc = frm.astype(np.float32) if acc is None else acc + frm
-            time.sleep(0.03)
-
-        frame = (acc / burst).astype(np.uint8)
+    def snapshot(cam=0, path="snapshot.jpg", warm=10, burst=5,
+                 res=(1600,1200)):
+        cap=cv2.VideoCapture(cam,cv2.CAP_DSHOW)
+        if res: w,h=res; cap.set(3,w); cap.set(4,h); time.sleep(.2)
+        for _ in range(warm): cap.read(); time.sleep(.04)
+        acc=None
+        for _ in range(burst):
+            _,f=cap.read(); acc=f.astype(np.float32) if acc is None else acc+f
+            time.sleep(.02)
         cap.release()
+        img=(acc/burst).astype(np.uint8)
+        Path(path).parent.mkdir(parents=True,exist_ok=True)
+        cv2.imwrite(path,img,[cv2.IMWRITE_JPEG_QUALITY,95]); return path
 
-        # --- optional colour correction -------------------------------------------
-        if colour_correct_img:
-            frame = colour_correct(frame)
+    # ---------- helpers ---------------------------------------------------
+    @staticmethod
+    def plate_from_tb(v): return {0:"12",1:"24",2:"48",3:"96"}.get(v,"96")
+    @staticmethod
+    def well_centers(x1,y1,x2,y2, p="96"):
+        r,c={"12":(8,12),"24":(4,6),"48":(6,8),"96":(8,12)}[p]
+        dx,dy=(x2-x1)/c,(y2-y1)/r
+        g=np.empty((r,c,2),float)
+        for i in range(r):
+            for j in range(c):
+                g[i,j]=(x1+(j+.5)*dx, y1+(i+.5)*dy)
+        return g
 
-        # --- save to disk ----------------------------------------------------------
-        Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(save_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        print(f"[Snapshot] {frame.shape[1]}×{frame.shape[0]} saved → {save_path}")
-        return save_path
+    # -------- avg_rgb : 11×11 trimmed mean --------------------------------
+    @staticmethod
+    def avg_rgb(img, centers, win=11, trim=0.1):
+        r=[]; h,w=img.shape[:2]; half=win//2
+        for row in centers:
+            rr=[]
+            for cx,cy in row:
+                x,y=int(cx),int(cy)
+                x1,x2=max(0,x-half),min(w,x+half+1)
+                y1,y2=max(0,y-half),min(h,y+half+1)
+                patch=img[y1:y2,x1:x2].reshape(-1,3).astype(np.float32)
+                if trim>0:
+                    k=int(len(patch)*trim)
+                    patch=np.sort(patch,0)[k:-k] if len(patch)>2*k else patch
+                rr.append(patch.mean(0)[::-1])   # RGB
+            r.append(rr)
+        return r
 
-
-    # ----------------------------------------------------------------
-    # -------------------- Utility / Image Methods --------------------
-    # ----------------------------------------------------------------
+    # -------- Root-Polynomial CCM (10 cols) -------------------------------
+    @staticmethod
+    def _poly_terms(lin):          # lin : N×3 in linear space
+        r,g,b = lin.T
+        return np.stack([r,g,b,
+                         np.sqrt(r*g),np.sqrt(r*b),np.sqrt(g*b),
+                         r*r,g*g,b*b,
+                         np.ones_like(r)],1)      # N×10
 
     @staticmethod
-    def resize_to_fit(img, max_width=1280, max_height=720):
-        """
-        *** RESIZE DISABLED ***
-        Originally returned a scaled copy and scale factor.
-        """
-        # h, w = img.shape[:2]
-        # scale = min(max_width / w, max_height / h, 1.0)
-        # resized = cv2.resize(img, (int(w * scale), int(h * scale)))
-        # return resized, scale
-        return img, 1.0  # full-resolution passthrough
+    def fit_rpcc(meas_rgb8, ref_rgb8):
+        m_lin = srgb2lin(meas_rgb8)
+        r_lin = srgb2lin(ref_rgb8)
+        X = PlateProcessor._poly_terms(m_lin)     # N×10
+        return r_lin.T @ np.linalg.pinv(X.T)      # 3×10
 
     @staticmethod
-    def plate_from_trackbar(val):
-        """
-        Map trackbar value (0..3) to a string plate type: 0->"12", 1->"24", 2->"48", 3->"96".
-        """
-        mapping = {0: "12", 1: "24", 2: "48", 3: "96"}
-        return mapping.get(val, "96")
-
-    @staticmethod
-    def get_well_centers_boxed_grid(x1, y1, x2, y2, plate_type="96"):
-        """
-        Return a NumPy array shaped  (rows, cols, 2) containing the
-        (x, y) centre coordinates for every well inside the rectangle.
-
-        Plate layouts:
-            "12" →  8 rows × 12 cols
-            "24" →  4 rows ×  6 cols
-            "48" →  6 rows ×  8 cols
-            "96" →  8 rows × 12 cols
-        """
-        layouts = {"12": (8, 12), "24": (4, 6), "48": (6, 8), "96": (8, 12)}
-        rows, cols = layouts.get(str(plate_type), layouts["96"])
-
-        dx, dy = (x2 - x1) / cols, (y2 - y1) / rows
-        grid = np.empty((rows, cols, 2), dtype=float)
-
-        for r in range(rows):
-            for c in range(cols):
-                grid[r, c, 0] = x1 + (c + 0.5) * dx   # x
-                grid[r, c, 1] = y1 + (r + 0.5) * dy   # y
-        return grid
-
-    @staticmethod
-    def extract_rgb_values(image, centers, x_offset: int = 0, y_offset: int = 0):
-        """
-        Sample **only the exact centre pixel** of each well and return a
-        2-D Python list with the same (rows, cols) shape as *centers*:
-
-            rgb_matrix[row][col]  →  [R, G, B]
-
-        Parameters
-        ----------
-        image : np.ndarray
-            BGR image from OpenCV.
-        centers : (rows, cols, 2) array-like
-            Grid of well centres; last dimension is (x, y).
-        x_offset, y_offset : int, optional
-            Subtract these values from every centre coordinate before lookup
-            (useful if *centers* were generated relative to a ROI).
-        """
-        h, w = image.shape[:2]
-
-        ctrs = np.asarray(centers, dtype=float)
-        if ctrs.ndim != 3 or ctrs.shape[-1] != 2:
-            raise ValueError("centers must have shape (rows, cols, 2)")
-
-        rows, cols = ctrs.shape[:2]
-        rgb_matrix: list[list[list[int]]] = [
-            [None for _ in range(cols)] for _ in range(rows)
-        ]
-
-        for r in range(rows):
-            for c in range(cols):
-                cx, cy = ctrs[r, c]
-                x = int(cx - x_offset)
-                y = int(cy - y_offset)
-
-                # bounds check
-                if 0 <= x < w and 0 <= y < h:
-                    b, g, r_val = image[y, x]      # BGR order in OpenCV
-                    rgb_matrix[r][c] = [int(r_val), int(g), int(b)]
-                else:
-                    rgb_matrix[r][c] = [0, 0, 0]   # fallback for out-of-bounds
-
-        return rgb_matrix
-
-    @staticmethod
-    def compute_rgb_statistics(rgb_matrix_transposed):
-        """
-        Given a (3 x N) matrix, first transpose it to (N x 3),
-        then compute mean, std, and pairwise distances (max, min, avg).
-        Requires scipy for pdist, squareform.
-        """
-        if rgb_matrix_transposed is None or rgb_matrix_transposed.size == 0:
-            return None
-
-        selected_rgbs = rgb_matrix_transposed.T  # (N, 3)
-        mean_rgb = np.mean(selected_rgbs, axis=0)
-        std_rgb = np.std(selected_rgbs, axis=0)
-
-        from scipy.spatial.distance import pdist, squareform
-        dist_matrix = squareform(pdist(selected_rgbs))
-        max_distance = np.max(dist_matrix)
-        min_distance = np.min(dist_matrix)
-        # average distance (upper triangle only, to avoid duplicates)
-        avg_distance = np.mean(dist_matrix[np.triu_indices(len(selected_rgbs), k=1)])
-        return (mean_rgb, std_rgb, max_distance, min_distance, avg_distance)
-
-    @staticmethod
-    def compute_color_correction_matrix(measured, real):
-        """
-        Compute the color correction matrix M such that:
-            Real_RGB = M * Measured_RGB
-        Parameters:
-            measured: (4, 3) array of measured RGB values (red, green, blue, white).
-            real: (4, 3) array of real RGB values (red, green, blue, white).
-        Returns:
-            M: (3, 3) color correction matrix.
-        """
-        measured = np.array(measured, dtype=np.float32).T  # Shape: (3, 4)
-        real = np.array(real, dtype=np.float32).T          # Shape: (3, 4)
-
-        # Solve for M using matrix multiplication
-        M = real @ np.linalg.pinv(measured)  # M = Real * Measured⁻¹
-        return M
-
-    @staticmethod
-    def apply_color_correction(rgb_matrix, M):
-        """
-        Apply the color correction matrix M to the RGB matrix.
-        Parameters:
-            rgb_matrix: (rows, cols, 3) array of measured RGB values for the plate.
-            M: (3, 3) color correction matrix.
-        Returns:
-            corrected_rgb_matrix: (rows, cols, 3) array of corrected RGB values.
-        """
-        # Convert rgb_matrix to a NumPy array if it's a list
-        rgb_matrix = np.array(rgb_matrix, dtype=np.float32)
-
-        rows, cols, _ = rgb_matrix.shape
-        corrected_rgb_matrix = np.empty_like(rgb_matrix, dtype=np.float32)
-
-        for r in range(rows):
-            for c in range(cols):
-                measured_rgb = rgb_matrix[r, c]
-                corrected_rgb = M @ measured_rgb  # Apply the transformation
-                corrected_rgb_matrix[r, c] = np.clip(corrected_rgb, 0, 255)  # Clip to valid range
-
-        return corrected_rgb_matrix.astype(np.uint8)
-
-    def calibrate_rgb_matrix(self, rgb_matrix, calibration_dots, resized_img):
-        """
-        Calibrate the RGB matrix using the calibration dots.
-        Parameters:
-            rgb_matrix: (rows, cols, 3) array of measured RGB values for the plate.
-            calibration_dots: List of (x, y) positions of the calibration dots.
-            resized_img: The resized image from which RGB values are extracted.
-        Returns:
-            corrected_rgb_matrix: (rows, cols, 3) array of calibrated RGB values.
-        """
-        # Real RGB values for the calibration dots
-        real_rgb = [
-            [255, 0, 0],    # Red
-            [0, 255, 0],    # Green
-            [0, 0, 255],    # Blue
-            [255, 255, 255] # White
-        ]
-
-        # Extract measured RGB values from the calibration dots
-        measured_rgb = []
-        for x, y in calibration_dots:
-            b, g, r = resized_img[int(y), int(x)]  # Extract BGR from the image
-            measured_rgb.append([r, g, b])        # Convert to RGB
-
-        # Compute the color correction matrix
-        M = self.compute_color_correction_matrix(measured_rgb, real_rgb)
-
-        # Apply the color correction matrix to the RGB matrix
-        corrected_rgb_matrix = self.apply_color_correction(rgb_matrix, M)
-        return corrected_rgb_matrix
-
-    # ----------------------------------------------------------------
-    # --------------------- Calibration UI ----------------------------
-    # ----------------------------------------------------------------
-
-    def draw_ui(self, disp):
-        """
-        Overlay the calibration UI on *disp*:
-          • corner handles & index
-          • bounding rectangle
-          • sample well centres
-          • calibration dots for colors
-          • instructions & Confirm button
-        """
-        h, w = disp.shape[:2]
-
-        # ------------------------------------------------------------------
-        # 1)  Instructions
-        # ------------------------------------------------------------------
-        instructions = [
-            "Drag corners to define plate region",
-            "Drag dots to define calibration colors",
-            "Use trackbar: (0=12,1=24,2=48,3=96)",
-            "Click 'Confirm' or press 'c' to finalize",
-            "Press ESC to cancel"
-        ]
-        y_off = 25
-        for txt in instructions:
-            cv2.putText(disp, txt, (10, y_off),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-            y_off += 30
-
-        # ------------------------------------------------------------------
-        # 2)  Corner handles
-        # ------------------------------------------------------------------
-        for i, pt in enumerate(self.points):
-            cv2.circle(disp, pt, 15, (0, 0, 255), -1)
-            cv2.putText(disp, f"{i+1}", (pt[0] + 5, pt[1] - 5),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-
-        # ------------------------------------------------------------------
-        # 3)  Rectangle & sample well centres
-        # ------------------------------------------------------------------
-        if len(self.points) == 4:
-            # lines between corners
-            for i in range(4):
-                cv2.line(disp, self.points[i],
-                         self.points[(i + 1) % 4], (0, 255, 0), 2)
-
-            xs = [p[0] for p in self.points]
-            ys = [p[1] for p in self.points]
-            rx1, ry1, rx2, ry2 = min(xs), min(ys), max(xs), max(ys)
-
-            cv2.rectangle(disp, (rx1, ry1), (rx2, ry2), (255, 0, 0), 1)
-
-            plate_val  = cv2.getTrackbarPos("Plate", "Calibration")
-            plate_type = self.plate_from_trackbar(plate_val)
-            centres    = self.get_well_centers_boxed_grid(rx1, ry1, rx2, ry2,
-                                                          plate_type)
-
-            # ── FLATTEN grid to iterate as (cx, cy) pairs ────────────────
-            for cx, cy in np.asarray(centres).reshape(-1, 2):
-                cv2.circle(disp, (int(cx), int(cy)), 6, (0, 0, 255), -1)
-
-        # ------------------------------------------------------------------
-        # 4)  Calibration dots
-        # ------------------------------------------------------------------
-        calibration_colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (255, 255, 255)]  # Red, Green, Blue, White
-        for i, (pt, color) in enumerate(zip(self.calibration_dots, calibration_colors)):
-            cv2.circle(disp, pt, 10, color, -1)
-            cv2.putText(disp, f"C{i+1}", (pt[0] + 10, pt[1] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-
-        # ------------------------------------------------------------------
-        # 5)  Confirm button
-        # ------------------------------------------------------------------
-        self.CONFIRM_BTN_TOPLEFT = (w - self.BTN_WIDTH - 10,
-                                    h - self.BTN_HEIGHT - 10)
-        bx, by = self.CONFIRM_BTN_TOPLEFT
-        cv2.rectangle(disp, (bx, by), (bx + self.BTN_WIDTH, by + self.BTN_HEIGHT),
-                      (50, 205, 50), -1)
-        cv2.putText(disp, "Confirm", (bx + 10, by + self.BTN_HEIGHT - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        return disp
-
-    def update_windows(self):
-        """
-        Re-draws the calibration display window with corner points,
-        bounding lines, and the confirm button.
-        """
-        disp = self.img_copy.copy()
-        disp = self.draw_ui(disp)
-        cv2.imshow("Calibration", disp)
-
-    def mouse_callback(self, event, x, y, flags, param):
-        """
-        Mouse event callback for dragging corners or calibration dots.
-        Also clamps dragged points to remain within image boundaries.
-        """
-        h, w = self.img_copy.shape[:2]
-
-        if event == cv2.EVENT_LBUTTONDOWN:
-            # Check if the Confirm button is clicked
-            if self.CONFIRM_BTN_TOPLEFT:
-                bx, by = self.CONFIRM_BTN_TOPLEFT
-                if (bx <= x <= bx + self.BTN_WIDTH and
-                        by <= y <= by + self.BTN_HEIGHT):
-                    self.confirmed = True
-                    return
-
-            # Check if near an existing corner
-            for i, pt in enumerate(self.points):
-                if np.hypot(x - pt[0], y - pt[1]) < 10:
-                    self.dragging_idx = i
-                    return
-
-            # Check if near a calibration dot
-            for i, pt in enumerate(self.calibration_dots):
-                if np.hypot(x - pt[0], y - pt[1]) < 10:
-                    self.dragging_calib_idx = i
-                    return
-
-        elif event == cv2.EVENT_MOUSEMOVE:
-            if self.dragging_idx != -1:
-                # Dragging a corner
-                clamped_x = max(0, min(x, w - 1))
-                clamped_y = max(0, min(y, h - 1))
-                self.points[self.dragging_idx] = (clamped_x, clamped_y)
-                self.update_windows()
-            elif self.dragging_calib_idx != -1:
-                # Dragging a calibration dot
-                clamped_x = max(0, min(x, w - 1))
-                clamped_y = max(0, min(y, h - 1))
-                self.calibration_dots[self.dragging_calib_idx] = (clamped_x, clamped_y)
-                self.update_windows()
-
-        elif event == cv2.EVENT_LBUTTONUP:
-            self.dragging_idx = -1
-            self.dragging_calib_idx = -1
-
-    def run_calibration_ui(self, resized_img):
-        """
-        Launches the calibration window. The user can:
-        - Drag each of the 4 corners
-        - Drag calibration dots for color calibration
-        - Use the trackbar for plate type
-        - Click 'Confirm' or press 'c' to finalize
-        - Press ESC to cancel
-        Returns a dict with {'rectangle': {...}, 'plate_type': ..., 'calibration_dots': [...]},
-        or None if canceled or timed out (3 mins).
-        """
-        self.img_copy = resized_img.copy()
-        h, w = resized_img.shape[:2]
-
-        # Set default corners (10% inset)
-        margin_w, margin_h = int(w * 0.1), int(h * 0.1)
-        self.points = [
-            (margin_w, margin_h),
-            (w - margin_w, margin_h),
-            (w - margin_w, h - margin_h),
-            (margin_w, h - margin_h),
-        ]
-
-        # Set default calibration dots (near corners)
-        self.calibration_dots = [
-            (margin_w + 20, margin_h + 20),  # Red
-            (w - margin_w - 20, margin_h + 20),  # Green
-            (w - margin_w - 20, h - margin_h - 20),  # Blue
-            (margin_w + 20, h - margin_h - 20),  # White/Black
-        ]
-
-        self.confirmed = False
-        self.dragging_idx = -1
-        self.dragging_calib_idx = -1
-
-        cv2.namedWindow("Calibration", cv2.WINDOW_NORMAL)
-        cv2.setMouseCallback("Calibration", self.mouse_callback)
-        cv2.createTrackbar("Plate", "Calibration", 3, 3, lambda v: self.update_windows())
-        self.update_windows()
-
-        print("=== Calibration UI ===")
-        print(" - Drag corners to match your plate edges.")
-        print(" - Drag dots to define calibration colors.")
-        print(" - Trackbar sets plate type (12,24,48,96).")
-        print(" - Click 'Confirm' or press 'c' to finalize.")
-        print(" - ESC or 3-minute timeout to cancel.\n")
-
-        start_time = time.time()
-        TIMEOUT_SECONDS = 180  # 3 minutes
-
-        while True:
-            key = cv2.waitKey(20) & 0xFF
-
-            if time.time() - start_time > TIMEOUT_SECONDS:
-                print("Calibration timed out. No confirmation within 3 minutes.")
-                self.confirmed = False
-                break
-
-            if key == 27:  # ESC
-                print("Calibration canceled by user (ESC).")
-                self.confirmed = False
-                break
-            elif key == ord('c'):
-                self.confirmed = True
-                break
-
-            if self.confirmed:
-                break
-
-        xs = [pt[0] for pt in self.points]
-        ys = [pt[1] for pt in self.points]
-        rx1, ry1, rx2, ry2 = int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))
-        plate_val = cv2.getTrackbarPos("Plate", "Calibration")
-        plate_type = self.plate_from_trackbar(plate_val)
-
-        cv2.destroyWindow("Calibration")
-
-        if not self.confirmed:
-            return None
-
-        return {
-            "rectangle": {"x1": rx1, "y1": ry1, "x2": rx2, "y2": ry2},
-            "plate_type": plate_type,
-            "calibration_dots": self.calibration_dots
-        }
-
-    def calibrate_from_file(self, image_path, calib_filename="calibration.json"):
-        """
-        Calibrate using an existing image file.
-        If a calibration file exists, the user is prompted whether to reuse it.
-        If not, run the calibration UI and save results.
-        Returns (calib_data, resized_img, scale).
-        """
-        img = cv2.imread(image_path)
-        if img is None:
-            raise FileNotFoundError(f"Could not load image: {image_path}")
-
-        resized_img, scale = self.resize_to_fit(img, 1280, 720)
-
-        # Check for existing JSON
-        if os.path.exists(calib_filename):
-            use_saved = input("Calibration data exists. Use saved calibration? (y/n): ").strip().lower()
-            if use_saved != "y":
-                os.remove(calib_filename)
-                print("Old calibration data deleted. Recalibrating...")
-                calib_data = self.run_calibration_ui(resized_img)
-                if calib_data is None:
-                    print("No calibration data saved (user canceled).")
-                    return None, resized_img, scale
-                with open(calib_filename, "w") as f:
-                    json.dump(calib_data, f, indent=4)
-            else:
-                with open(calib_filename, "r") as f:
-                    calib_data = json.load(f)
-        else:
-            # No existing file, run calibration UI
-            print("No calibration file found; running calibration UI...")
-            calib_data = self.run_calibration_ui(resized_img)
-            if calib_data is None:
-                print("No calibration data saved (user canceled).")
-                return None, resized_img, scale
-
-            with open(calib_filename, "w") as f:
-                json.dump(calib_data, f, indent=4)
-            print("Calibration data saved.")
-
-        return calib_data, resized_img, scale
-
-    def calibrate_from_camera(self, cam_index=0, snapshot_path="calibration_pic.jpg",
-                              calib_filename="calibration.json", warmup=10):
-        """
-        1) Take a snapshot from the specified camera index.
-        2) Then run calibrate_from_file() on that snapshot.
-        Returns (calib_data, resized_img, scale).
-        """
-        print(f"Taking snapshot from camera index {cam_index}...")
-        pic_path = self.take_snapshot(cam_index, snapshot_path, warmup_frames=warmup)
-        return self.calibrate_from_file(pic_path, calib_filename)
-
-    # ----------------------------------------------------------------
-    # ------------------- Modified process_image ----------------------
-    # ----------------------------------------------------------------
-
-    def process_image(
-            self,
-            cam_index: int = 0,
-            warmup: int = 10,
-            image_path: str | None = None,
-            calib_filename: str = "calibration.json",
-            snapshot_file: str = "snapshot.jpg"
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """
-        • Always capture a fresh frame into SNAPSHOT_FILE (constant name).
-        • If calibration data is missing, launch the UI once, then reuse it.
-        • Return a tuple: (raw_rgb_matrix, corrected_rgb_matrix).
-        """
-
-        # ------------------------------------------------------------------
-        # 1)  Capture — always overwrite the constant file
-        # ------------------------------------------------------------------
-        if image_path is None:
-            image_path = snapshot_file         # <── use the constant
-
-        self.take_snapshot(
-            cam_index=cam_index,
-            save_path=image_path,
-            warmup_frames=warmup,
-        )
-
-        # ------------------------------------------------------------------
-        # 2)  Ensure calibration data exists
-        # ------------------------------------------------------------------
-        if not os.path.exists(calib_filename):
-            print("[INFO] No calibration file found – entering calibration UI…")
-            calib_data, _, _ = self.calibrate_from_file(
-                image_path=image_path,
-                calib_filename=calib_filename,
-            )
-            if calib_data is None:
-                raise RuntimeError("Calibration aborted – no data saved.")
-        else:
-            with open(calib_filename, "r") as f:
-                calib_data = json.load(f)
-
-        # ------------------------------------------------------------------
-        # 3)  Extract the RGB matrix
-        # ------------------------------------------------------------------
-        img = cv2.imread(image_path)
-        if img is None:
-            raise FileNotFoundError(f"Unable to read snapshot: {image_path}")
-
-        resized_img, _ = self.resize_to_fit(img, 1280, 720)
-
-        rect = calib_data["rectangle"]
-        rx1, ry1, rx2, ry2 = rect["x1"], rect["y1"], rect["x2"], rect["y2"]
-        plate_type = calib_data["plate_type"]
-
-        centers = self.get_well_centers_boxed_grid(
-            rx1, ry1, rx2, ry2, plate_type
-        )
-        raw_rgb_matrix = self.extract_rgb_values(
-            resized_img, centers, x_offset=rx1, y_offset=ry1
-        )
-
-        # ------------------------------------------------------------------
-        # 4)  Calibrate the RGB matrix
-        # ------------------------------------------------------------------
-        calibration_dots = calib_data["calibration_dots"]
-        corrected_rgb_matrix = self.calibrate_rgb_matrix(raw_rgb_matrix, calibration_dots, resized_img)
-
-        return raw_rgb_matrix, corrected_rgb_matrix
-
-
-
+    def apply_rpcc(rgb8, M10):
+        lin = srgb2lin(rgb8.astype(np.float32).reshape(-1,3))
+        corr = M10 @ PlateProcessor._poly_terms(lin).T
+        return lin2srgb(corr.T).reshape(rgb8.shape).clip(0,255).astype(np.uint8)
+
+    # -------------------- (UI 代码保持不变，略) -----------------------------
+
+    # ----------------------- processing pipeline --------------------------
+    def process_image(self, cam_index=0, snap="snapshot.jpg",
+                      calib="calibration.json", force_ui=False):
+        self.snapshot(cam_index,snap)
+
+        cfg=None
+        if os.path.exists(calib):
+            cfg=json.load(open(calib))
+        if force_ui or cfg is None:
+            cfg=self.run_ui(cv2.imread(snap),cfg)
+            json.dump(cfg,open(calib,"w"),indent=2)
+
+        img=cv2.imread(snap)
+        r=cfg["rectangle"]
+        centres=self.well_centers(r["x1"],r["y1"],r["x2"],r["y2"],cfg["plate_type"])
+        raw = self.avg_rgb(img, centres)
+
+        dots=np.asarray(cfg["calibration_dots"],int)
+        meas_raw = img[dots[:,1],dots[:,0],::-1].astype(np.float32) # N×3 RGB
+        M10 = self.fit_rpcc(meas_raw, MACBETH_24_RGB)
+        meas_corr = self.apply_rpcc(meas_raw, M10)
+        corr = self.apply_rpcc(np.array(raw,np.float32), M10)
+
+        # -------- draw results --------
+        alpha=cfg.get("contrast",10)/10.0; beta=cfg.get("brightness",100)-100
+        raw_adj=np.clip(np.array(raw)*alpha+beta,0,255).astype(np.uint8)
+
+        marked=img.copy(); R=10
+        for ctr_row,r_row,c_row in zip(centres,raw_adj,corr):
+            for (cx,cy),rgb_r,rgb_c in zip(ctr_row,r_row,c_row):
+                cv2.circle(marked,(int(cx),int(cy)),R,tuple(int(v) for v in rgb_c[::-1]),-1)
+                cv2.ellipse(marked,(int(cx),int(cy)),(R,R),0,90,270,
+                            tuple(int(v) for v in rgb_r[::-1]),-1)
+
+        SHIFT=R+10
+        for i,((x,y),rgb_r,rgb_c) in enumerate(zip(dots,meas_raw,meas_corr)):
+            centre=(int(x),int(y))
+            bgr_r = tuple(int(v) for v in rgb_r[::-1])
+            bgr_c = tuple(int(v) for v in rgb_c[::-1])
+            bgr_ref = MACBETH_24_BGR[i]
+
+            cv2.circle(marked, centre, R, bgr_c, -1)
+            cv2.ellipse(marked, centre, (R,R), 0, 90, 270, bgr_r, -1)
+            cv2.circle(marked, (centre[0]+SHIFT, centre[1]), R, bgr_ref, -1)
+
+        cv2.imwrite("output_with_centers_corr.jpg",marked)
+        print("[Saved] output_with_centers_corr.jpg")
+        return corr
+
+# ---------------- CLI ----------------
+if __name__ == "__main__":
+    # ap=argparse.ArgumentParser()
+    # ap.add_argument("--cam",type=int,default=1)
+    # ap.add_argument("--recalib",action="store_true")
+    # args=ap.parse_args()
+
+    corr = PlateProcessor().process_image(cam_index=1)
+    # print("First corrected RGB:", corr[0][0])
