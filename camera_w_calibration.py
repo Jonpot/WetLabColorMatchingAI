@@ -356,6 +356,12 @@ class PlateProcessor:
         meas_corr = self.apply_rpcc(meas_raw, M10)
         corr = self.apply_rpcc(np.array(raw, np.float32), M10)
 
+        # Save corrected matrix to a file
+        corrected_matrix_file = "corrected_matrix.json"
+        with open(corrected_matrix_file, "w") as f:
+            json.dump(corr.tolist(), f, indent=2)
+        print(f"[Saved] Corrected matrix to {corrected_matrix_file}")
+
         # 3) build diagnostic image
         alpha = cfg.get("contrast", 10) / 10.0
         beta  = cfg.get("brightness", 100) - 100
@@ -380,9 +386,9 @@ class PlateProcessor:
                                                        meas_raw,
                                                        meas_corr)):
             centre = (int(x), int(y))
-            bgr_r  = tuple(int(v) for v in rgb_r[::-1])
-            bgr_c  = tuple(int(v) for v in rgb_c[::-1])
-            bgr_ref = MACBETH_24_BGR[i]
+            bgr_r  = tuple(int(v) for v in rgb_r[::-1]) #raw color
+            bgr_c  = tuple(int(v) for v in rgb_c[::-1]) #correction color
+            bgr_ref = MACBETH_24_BGR[i] #reference color
 
             # half-circle
             cv2.circle(marked, centre, RADIUS, bgr_c, -1)
@@ -399,6 +405,14 @@ class PlateProcessor:
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════
 if __name__ == "__main__":
-    
-    corr = PlateProcessor().process_image(cam_index=1, force_ui=False)
-    print("First corrected RGB (row 0):", corr[0])
+    from ot2_utils import OT2Manager
+    # robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None)
+    # robot.add_turn_on_lights_action()
+    # robot.execute_actions_on_remote()
+
+    corr = PlateProcessor().process_image(cam_index=1, force_ui=True)
+
+    # robot.add_turn_off_lights_action()
+    # robot.add_close_action()
+    # robot.execute_actions_on_remote()
+    # print("First corrected RGB (row 0):", corr[0])

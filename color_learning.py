@@ -43,7 +43,10 @@ class ColorLearningOptimizer:
     
     
     def calculate_distance(self, color: list, target_color: list) -> float:
-        return math.sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(color, target_color)))
+        print(f"Running calculate distance. Color: {color}, type: {type(color)}, target_color: {target_color}, type: {type(target_color)}")
+        print(f"Sum: {sum((int(c1) - int(c2)) ** 2 for c1, c2 in zip(color, target_color))}")
+        print(f"Raw sqrt: {math.sqrt(sum((int(c1) - int(c2)) ** 2 for c1, c2 in zip(color, target_color)))}")
+        return math.sqrt(sum((int(c1) - int(c2)) ** 2 for c1, c2 in zip(color, target_color)))
 
     def within_tolerance(self, color: list, target_color: list) -> bool:
         return self.calculate_distance(color, target_color) <= self.tolerance
@@ -142,7 +145,7 @@ class ColorLearningOptimizer:
         try:
             dye_colors = np.zeros((self.dye_count, 3))
             for i in range(3):
-                result = lstsq(X_norm, Y[:, i], rcond=None)
+                result = lstsq(X_norm, Y[:, i], cond=None)
                 dye_colors[:, i] = result[0]
             dye_colors = np.clip(dye_colors, 0, 255)
 

@@ -9,7 +9,11 @@ import threading
 class OT2Manager:
     def __init__(self, hostname: str, username: str, password: str, key_filename: str, virtual_mode: bool = False) -> None:
         self.virtual_mode = virtual_mode
-        if not self.virtual_mode:
+        if self.virtual_mode:
+            self.args = {"is_updated": False, "actions": []}
+            self.finished_flag = False
+            self.error_flag = False
+        else:
             # OT2 robot connection details
             self.hostname = hostname
             self.username = username
@@ -193,6 +197,8 @@ class OT2Manager:
 
     def __del__(self) -> None:
         # Close the SSH connection when the object is deleted.
+        if self.virtual_mode:
+            return
         if self.ssh:
             self.ssh.close()
             print("SSH connection closed.")
