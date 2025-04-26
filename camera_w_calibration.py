@@ -12,7 +12,7 @@ camera_color24.py  ―  24-patch ColorChecker calibration pipeline
     └ each chart patch:   left-half = raw,    right-half = corrected,
                           right-shifted solid circle = Macbeth reference
 """
-
+# ssh -i C:\Users\shich\.ssh\ot2_ssh_key root@172.26.192.201  
 from __future__ import annotations
 import cv2, time, json, os, argparse
 import numpy as np
