@@ -1,7 +1,8 @@
 import numpy as np
 import random
 import math
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from sklearn.preprocessing import MinMaxScaler
 from scipy.optimize import nnls
 from scipy.linalg import lstsq
@@ -13,16 +14,23 @@ class ColorLearningOptimizer:
                  step: int = 1,
                  tolerance: int = 30,
                  min_required_volume: int = 20,
-                 optimization_mode: str = "unmixing"  # or "random_forest"
-                ):
+                 optimization_mode: str = "mlp_active",
+                 n_models: int = 5,
+                 exploration_weight: float = 1.0):
         self.dye_count = dye_count
         self.max_well_volume = max_well_volume
         self.step = step
         self.tolerance = tolerance
         self.min_required_volume = min_required_volume
         self.optimization_mode = optimization_mode
+        self.n_models = n_models
+        self.exploration_weight = exploration_weight
+
         self.X_train = []
         self.Y_train = []
+
+        if self.optimization_mode == "mlp_active":
+            self.models = [MLPRegressor(hidden_layer_sizes=(32, 32), max_iter=5000, random_state=42+i) for i in range(self.n_models)]
 
     def reset(self):
         self.X_train = []
@@ -31,17 +39,23 @@ class ColorLearningOptimizer:
     def add_data(self, volumes: list, measured_color: list):
         self.X_train.append(volumes)
         self.Y_train.append(measured_color)
+        if self.optimization_mode == "mlp_active" and len(self.X_train) >= 5:
+            for model in self.models:
+                model.fit(self.X_train, self.Y_train)
 
     def suggest_next_experiment(self, target_color: list) -> list:
-        if self.optimization_mode == "unmixing":
+        if self.optimization_mode == "mlp_active":
+            volumes = self._mlp_active_optimize(target_color)
+        elif self.optimization_mode == "unmixing":
             volumes = self._color_unmixing_optimize(target_color)
         elif self.optimization_mode == "random_forest":
             volumes = self._random_forest_optimize(target_color)
+        elif self.optimization_mode == "extratree_active":
+            volumes = self._extratree_active_optimize(target_color)
         else:
             raise ValueError(f"Unknown optimization mode: {self.optimization_mode}")
-        return self._apply_min_volume_constraint(volumes)
-    
-    
+        return volumes
+
     def calculate_distance(self, color: list, target_color: list) -> float:
         return math.sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(color, target_color)))
 
@@ -71,31 +85,93 @@ class ColorLearningOptimizer:
             lucky_dye = random.randint(0, self.dye_count - 1)
             vols[lucky_dye] += remain
 
-        return vols
+        return self._apply_min_volume_constraint(vols)
 
     def _apply_min_volume_constraint(self, volumes: list) -> list:
-        # Remove dyes with volume below threshold
-        volumes = [v if v >= self.min_required_volume else 0 for v in volumes]
+        adjusted = []
+        for v in volumes:
+            if v == 0:
+                adjusted.append(0)
+            elif v < self.min_required_volume:
+                if abs(v - 0) < abs(v - self.min_required_volume):
+                    adjusted.append(0)
+                else:
+                    adjusted.append(self.min_required_volume)
+            else:
+                adjusted.append(v)
 
-        total_vol = sum(volumes)
+        total_vol = sum(adjusted)
         if total_vol == 0:
             return self._random_combination()
 
-        # Rescale to total max_well_volume
         scale = self.max_well_volume / total_vol
-        volumes = [int(v * scale) for v in volumes]
+        adjusted = [int(v * scale) for v in adjusted]
 
-        diff = self.max_well_volume - sum(volumes)
+        diff = self.max_well_volume - sum(adjusted)
         if diff != 0:
-            max_idx = np.argmax(volumes)
-            volumes[max_idx] += diff
+            max_idx = np.argmax(adjusted)
+            adjusted[max_idx] += diff
 
-        return volumes
+        return adjusted
+
+    def _mlp_active_optimize(self, target_rgb: list) -> list:
+        if len(self.X_train) < 5:
+            return self._random_combination()
+
+        candidates = [self._random_combination() for _ in range(200)]
+        candidates_np = np.array(candidates)
+
+        all_preds = np.array([model.predict(candidates_np) for model in self.models])
+        mean_preds = np.mean(all_preds, axis=0)
+        std_preds = np.std(all_preds, axis=0)
+
+        mean_distances = np.linalg.norm(mean_preds - np.array(target_rgb), axis=1)
+        uncertainty_scores = np.linalg.norm(std_preds, axis=1)
+
+        acquisition_scores = -mean_distances + self.exploration_weight * uncertainty_scores
+
+        best_idx = np.argmax(acquisition_scores)
+        return candidates[best_idx]
+
+    def _extratree_active_optimize(self, target_rgb: list) -> list:
+        if len(self.X_train) == 0:
+            return self._random_combination()
+
+        scaler = MinMaxScaler()
+        X_train_scaled = scaler.fit_transform(self.X_train)
+
+        n_estimators = min(100, max(10, len(self.X_train) * 5))
+        et = ExtraTreesRegressor(n_estimators=n_estimators, random_state=42)
+
+        try:
+            et.fit(X_train_scaled, self.Y_train)
+        except Exception as e:
+            print(f"ExtraTrees training failed: {e}")
+            return self._random_combination()
+
+        candidates = [self._random_combination() for _ in range(200)]
+        X_candidates_scaled = scaler.transform(candidates)
+
+        try:
+            preds = np.array([tree.predict(X_candidates_scaled) for tree in et.estimators_])
+            mean_preds = np.mean(preds, axis=0)
+            std_preds = np.std(preds, axis=0)
+
+            mean_distances = np.linalg.norm(mean_preds - np.array(target_rgb), axis=1)
+            uncertainty_scores = np.linalg.norm(std_preds, axis=1)
+
+            acquisition_scores = -mean_distances + self.exploration_weight * uncertainty_scores
+
+            best_idx = np.argmax(acquisition_scores)
+            return candidates[best_idx]
+
+        except Exception as e:
+            print(f"ExtraTrees prediction failed: {e}")
+            return self._random_combination()
 
     def _random_forest_optimize(self, target_rgb: list) -> list:
         if len(self.X_train) == 0:
-            random_volumes = self._random_combination()
-            return self._apply_min_volume_constraint(random_volumes)
+            return self._random_combination()
 
         scores = np.array([self._color_distance_score(color, target_rgb) for color in self.Y_train])
         scaler = MinMaxScaler()
@@ -110,8 +186,7 @@ class ColorLearningOptimizer:
             return self._random_combination()
 
         candidates = [self._random_combination() for _ in range(50)]
-        X_candidates = np.array(candidates)
-        X_candidates_scaled = scaler.transform(X_candidates)
+        X_candidates_scaled = scaler.transform(candidates)
 
         try:
             predicted_scores = rf.predict(X_candidates_scaled)
@@ -120,7 +195,7 @@ class ColorLearningOptimizer:
             acquisition = predicted_scores + uncertainties
             sorted_indices = np.argsort(acquisition)[::-1]
             best = candidates[sorted_indices[0]]
-            return self._apply_min_volume_constraint(best)
+            return best
 
         except Exception as e:
             print(f"Random Forest prediction failed: {e}")
@@ -132,8 +207,7 @@ class ColorLearningOptimizer:
 
     def _color_unmixing_optimize(self, target_rgb: list) -> list:
         if len(self.X_train) < 2:
-            random_volumes = self._random_combination()
-            return self._apply_min_volume_constraint(random_volumes)
+            return self._random_combination()
 
         X = np.array(self.X_train)
         X_norm = np.array([row / (np.sum(row) if np.sum(row) > 0 else 1) for row in X])
@@ -142,7 +216,7 @@ class ColorLearningOptimizer:
         try:
             dye_colors = np.zeros((self.dye_count, 3))
             for i in range(3):
-                result = lstsq(X_norm, Y[:, i], rcond=None)
+                result = lstsq(X_norm, Y[:, i], cond=None)
                 dye_colors[:, i] = result[0]
             dye_colors = np.clip(dye_colors, 0, 255)
 
