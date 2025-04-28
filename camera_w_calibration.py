@@ -416,3 +416,6 @@ if __name__ == "__main__":
     # robot.add_close_action()
     # robot.execute_actions_on_remote()
     # print("First corrected RGB (row 0):", corr[0])
+
+# conda install -n myenv numpy scikit-learn scipy opencv paramiko scp -y
+# pip install numpy scikit-learn scipy opencv-python paramiko scp
