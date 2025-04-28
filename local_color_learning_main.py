@@ -17,5 +17,5 @@ robot.execute_actions_on_remote()
 # robot.add_add_color_action(color_slot='7', plate_well="A1", volume=30)
 robot.add_close_action()
 
-robot.execute_actions_on_remote()
-print("Post-execution 2")
+# robot.execute_actions_on_remote()
+# print("Post-execution 2")
