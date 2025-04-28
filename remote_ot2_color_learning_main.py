@@ -20,6 +20,10 @@ class WellFullError(Exception):
     """Exception raised when a well is full."""
     pass
 
+class TiprackEmptyError(Exception):
+    """Exception raised when the tip rack is empty."""
+    pass
+
 def run(protocol: protocol_api.ProtocolContext) -> None:
     """Defines the testing protocol."""
     protocol.comment("Start of run.")
@@ -113,14 +117,19 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         try:
             next_well = tiprack_state.index(True)
         except ValueError:
-            protocol.comment("No tips left in the tip rack, switching to new rack.")
-            on_deck_position = pipette.tip_racks[0].parent
-            new_tiprack = off_deck_tipracks.pop()
-            protocol.move_labware(labware=pipette.tip_racks[0], new_location=protocol_api.OFF_DECK)
-            protocol.move_labware(labware=new_tiprack, new_location=on_deck_position)
-            pipette.tip_racks[0] = new_tiprack
-            next_well = 0
-            tiprack_state = [True] * 96
+            #protocol.comment("No tips left in the tip rack, switching to new rack.")
+            #on_deck_position = pipette.tip_racks[0].parent
+            #new_tiprack = off_deck_tipracks.pop()
+            #protocol.move_labware(labware=pipette.tip_racks[0], new_location=protocol_api.OFF_DECK)
+            #protocol.move_labware(labware=new_tiprack, new_location=on_deck_position)
+            #pipette.tip_racks[0] = new_tiprack
+            #next_well = 0
+            #tiprack_state = [True] * 96
+
+            # The above code only works via the OT2 Server GUI, not via the CLI.
+            # So we will just raise an error instead.
+            raise TiprackEmptyError("No tips left in the tip rack.")
+
         pipette.pick_up_tip(location=pipette.tip_racks[0].well(next_well))
         tiprack_state[next_well] = False
 
@@ -159,6 +168,15 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         """
         protocol.comment("Turning off lights.")
         protocol.set_rail_lights(on=False)
+
+    def refresh_tiprack() -> None:
+        """
+        Resets the tip rack state to all tips available.
+        """
+        global tiprack_state
+        protocol.comment("Refreshing tip rack.")
+        tiprack_state = [True] * 96
+        protocol.comment("Tip rack refreshed.")
 
     def add_color(
             color_slot: str | int,
@@ -307,10 +325,14 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     turn_on_lights()
                 elif subaction_name == "turn_off_lights":
                     turn_off_lights()
+                elif subaction_name == "refresh_tiprack":
+                    refresh_tiprack()
                 elif subaction_name == "add_color":
                     try:
                         add_color(subaction_args["color_slot"], subaction_args["plate_well"], subaction_args["volume"])
                     except WellFullError as e:
+                        return failed_to_run_actions(e)
+                    except TiprackEmptyError as e:
                         return failed_to_run_actions(e)
                 elif subaction_name == "calibrate_96_well_plate":
                     calibrate_96_well_plate()
