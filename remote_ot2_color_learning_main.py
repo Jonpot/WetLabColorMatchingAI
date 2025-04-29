@@ -109,11 +109,28 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         return colors, plate, pipette, tiprack_state, off_deck_tipracks
 
-    def pick_up_tip() -> None:
+    def pick_up_tip(color_slot: str = None) -> None:
         """
         Picks up a tip from the tip rack.
         """
-        global tiprack_state
+        global tiprack_state, reduced_tips_info
+
+        if reduced_tips_info is not None:
+            if color_slot not in reduced_tips_info:
+                try:
+                    color_slot_well = tiprack_state.index(True)
+                except ValueError:
+                    raise TiprackEmptyError(f"No tips left in the tip rack to assign for {color_slot}.")
+                reduced_tips_info[color_slot] = color_slot_well
+                protocol.comment(f"Using tip {color_slot_well} for color slot {color_slot}.")
+                tiprack_state[color_slot_well] = False
+
+                # At this point, this color slot has a dedicated tip assigned to it.
+                # Pick up this tip
+                pipette.pick_up_tip(location=pipette.tip_racks[0].well(color_slot_well))
+                return
+            
+
         try:
             next_well = tiprack_state.index(True)
         except ValueError:
@@ -133,10 +150,23 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.pick_up_tip(location=pipette.tip_racks[0].well(next_well))
         tiprack_state[next_well] = False
 
-    def return_tip() -> None:
+    def return_tip(color_slot: str = None) -> None:
         """
         Returns the tip to the tip rack.
         """
+        global reduced_tips_info
+
+        if reduced_tips_info is not None:
+            # Then we need to return this tip back to the tip rack
+            if color_slot not in reduced_tips_info:
+                protocol.comment(f"Something is wrong. Tip {color_slot} is not in reduced_tips_info: {reduced_tips_info}, but then I don't know how I got this tip.")
+                pipette.drop_tip()
+                return 
+            
+            color_slot_well = reduced_tips_info[color_slot]
+            protocol.comment(f"Returning tip {color_slot_well} to color slot {color_slot}.")
+            pipette.return_tip(location=pipette.tip_racks[0].well(color_slot_well))
+
         pipette.drop_tip()
 
 
@@ -176,6 +206,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         global tiprack_state
         protocol.comment("Refreshing tip rack.")
         tiprack_state = [True] * 96
+        pipette.reset_tipracks()
         protocol.comment("Tip rack refreshed.")
 
     def add_color(
@@ -191,11 +222,11 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         :raises ValueError: If the well is already full.
         """
-        global tiprack_state
+        global tiprack_state, reduced_tips_info
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
             raise WellFullError("Cannot add color to well; well is full.")
 
-        pick_up_tip()
+        pick_up_tip(color_slot)
         pipette.aspirate(volume, colors[color_slot])
         pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
         pipette.dispense(volume, plate.labware[plate_well].bottom(z=81))
@@ -203,15 +234,15 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         plate.wells[plate_well].volume += volume
 
         # Quick mix (has to be manual because the default mix function doesn't work with the large adapter)
-        pipette.aspirate(volume/2, plate.labware[plate_well].bottom(z=81))
-        pipette.dispense(volume/2, plate.labware[plate_well].bottom(z=81))
-        pipette.aspirate(volume/2, plate.labware[plate_well].bottom(z=81))
-        pipette.dispense(volume/2, plate.labware[plate_well].bottom(z=81))
+        pipette.aspirate(volume/2, plate.labware[plate_well].bottom(z=80))
+        pipette.dispense(volume/2, plate.labware[plate_well].bottom(z=80))
+        pipette.aspirate(volume/2, plate.labware[plate_well].bottom(z=80))
+        pipette.dispense(volume/2, plate.labware[plate_well].bottom(z=80))
 
         # Blowout the remaining liquid in the pipette
         pipette.blow_out(plate.labware[plate_well].bottom(z=95))
 
-        return_tip()
+        return_tip(color_slot)
 
     def calibrate_96_well_plate() -> None:
         """
@@ -233,10 +264,18 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         """
         Closes the protocol, saving the state of the tip rack.
         """
-        global tiprack_state, run_flag
+        global tiprack_state, run_flag, reduced_tips_info
         if  protocol.is_simulating():
             # don't save tiprack state in simulation
             return
+        
+        # if using reduced tips, move all the tips to trash
+        if reduced_tips_info is not None:
+            for color_slot, tip in reduced_tips_info.items():
+                protocol.comment(f"Returning tip {tip} to trash for color slot {color_slot}.")
+                pipette.pick_up_tip(locations=pipette.tip_racks[0].well(tip))
+                pipette.drop_tip()
+
         with open(get_filename('color_matching_tiprack.jsonx'), 'w') as f:
             json.dump(tiprack_state, fp=f)
 
@@ -248,12 +287,35 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     #plate_type = get_plate_type()
     plate_type = "corning_96_wellplate_360ul_flat" # TODO: Remove this line when get_plate_type is implemented 
-    global tiprack_state, run_flag
+    global tiprack_state, run_flag, reduced_tips_info
+    reduced_tips_info = None
     protocol.comment("Loading labware and instruments...")
     colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type)
     # Wait for the json to change
 
     run_flag = True
+
+    # Check for special tiprack information
+    try:
+        with open(get_filename('args.jsonx'), 'r') as f:
+            data: Dict[str, Any] = json.load(f)
+            if "reduced_tips_info" in data:
+                n = data["reduced_tips_info"]
+                protocol.comment(f"Reduced tips info found. {n+1} tips will be used, 1 for each color and 1 for mixing.")
+                # ensure that n+1 tips are available in the tip rack state
+                if len([x for x in tiprack_state if x]) < n + 1:
+                    protocol.comment(f"Not enough tips available in the tip rack. {n+1} tips are needed, but only {len([x for x in tiprack_state if x])} are available.")
+                    raise TiprackEmptyError("Not enough tips available in the tip rack.")
+                reduced_tips_info = {}
+
+
+    except FileNotFoundError:
+        protocol.comment(f"{get_filename('args.jsonx')} not found. Assuming regular tip usage.")
+    except json.JSONDecodeError:
+        protocol.comment(f"{get_filename('args.jsonx')} is not valid JSON. Assuming regular tip usage.")
+        protocol.comment(f"(The file had the following contents: {f.read()})")
+    except Exception as e:
+        protocol.comment(f"Unexpected error: {e}. Assuming regular tip usage.")
     protocol.comment("Ready")
     while run_flag:
         try:
