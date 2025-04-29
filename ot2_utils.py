@@ -6,14 +6,20 @@ from scp import SCPClient
 from typing import Any, Dict, Optional
 import threading
 
+class WellFullError(Exception):
+    """Exception raised when a well is full."""
+    pass
+
+class TiprackEmptyError(Exception):
+    """Exception raised when the tip rack is empty."""
+    pass
+
+
 class OT2Manager:
     def __init__(self, hostname: str, username: str, password: str, key_filename: str, virtual_mode: bool = False) -> None:
         self.virtual_mode = virtual_mode
-        if self.virtual_mode:
-            self.args = {"is_updated": False, "actions": []}
-            self.finished_flag = False
-            self.error_flag = False
-        else:
+        self.last_error_type = None
+        if not self.virtual_mode:
             # OT2 robot connection details
             self.hostname = hostname
             self.username = username
@@ -104,6 +110,12 @@ class OT2Manager:
                                     print("Error detected in remote process output.")
                                     self.finished_flag = True
                                     self.error_flag = True
+
+                                    if "tip" in line:
+                                        self.last_error_type = TiprackEmptyError
+                                    elif "well" in line:
+                                        self.last_error_type = WellFullError
+                                    print(f"Last error type set to: {self.last_error_type}")
                     # Exit loop if the channel is closed.
                     if channel.closed:
                         print("Remote shell channel closed.")
@@ -191,14 +203,16 @@ class OT2Manager:
         """Queue a close action."""
         self._add_action("close")
 
+    def add_refresh_tiprack_action(self) -> None:
+        """Queue a refresh tip rack action."""
+        self._add_action("refresh_tiprack")
+
     def add_add_color_action(self, color_slot: str, plate_well: str, volume: float) -> None:
         """Queue an add color action."""
         self._add_action("add_color", {"color_slot": color_slot, "plate_well": plate_well, "volume": volume})
 
     def __del__(self) -> None:
         # Close the SSH connection when the object is deleted.
-        if self.virtual_mode:
-            return
         if self.ssh:
             self.ssh.close()
             print("SSH connection closed.")
