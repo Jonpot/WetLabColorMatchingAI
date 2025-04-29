@@ -201,10 +201,10 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     def refresh_tiprack() -> None:
         """
-        Resets the tip rack state to all tips available.
+        Resets the tip rack state to all tips available and resets pipette tracking.
         """
         global tiprack_state
-        protocol.comment("Refreshing tip rack.")
+        protocol.comment("Refreshing tip rack...")
         tiprack_state = [True] * 96
         pipette.reset_tipracks()
         protocol.comment("Tip rack refreshed.")
