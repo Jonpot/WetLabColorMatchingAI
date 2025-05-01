@@ -16,6 +16,14 @@ metadata = {
 
 requirements = {'robotType': 'OT-2', 'apiLevel': '2.19'}
 
+class WellFullError(Exception):
+    """Exception raised when a well is full."""
+    pass
+
+class TiprackEmptyError(Exception):
+    """Exception raised when the tip rack is empty."""
+    pass
+
 def run(protocol: protocol_api.ProtocolContext) -> None:
     """Defines the testing protocol."""
     protocol.comment("Start of run.")
@@ -109,14 +117,19 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         try:
             next_well = tiprack_state.index(True)
         except ValueError:
-            protocol.comment("No tips left in the tip rack, switching to new rack.")
-            on_deck_position = pipette.tip_racks[0].parent
-            new_tiprack = off_deck_tipracks.pop()
-            protocol.move_labware(labware=pipette.tip_racks[0], new_location=protocol_api.OFF_DECK)
-            protocol.move_labware(labware=new_tiprack, new_location=on_deck_position)
-            pipette.tip_racks[0] = new_tiprack
-            next_well = 0
-            tiprack_state = [True] * 96
+            #protocol.comment("No tips left in the tip rack, switching to new rack.")
+            #on_deck_position = pipette.tip_racks[0].parent
+            #new_tiprack = off_deck_tipracks.pop()
+            #protocol.move_labware(labware=pipette.tip_racks[0], new_location=protocol_api.OFF_DECK)
+            #protocol.move_labware(labware=new_tiprack, new_location=on_deck_position)
+            #pipette.tip_racks[0] = new_tiprack
+            #next_well = 0
+            #tiprack_state = [True] * 96
+
+            # The above code only works via the OT2 Server GUI, not via the CLI.
+            # So we will just raise an error instead.
+            raise TiprackEmptyError("No tips left in the tip rack.")
+
         pipette.pick_up_tip(location=pipette.tip_racks[0].well(next_well))
         tiprack_state[next_well] = False
 
@@ -155,7 +168,18 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         """
         protocol.comment("Turning off lights.")
         protocol.set_rail_lights(on=False)
-    
+
+    def refresh_tiprack() -> None:
+        """
+        Resets the tip rack state to all tips available and resets pipette tracking.
+        """
+        global tiprack_state
+        protocol.comment("Refreshing tip rack...")
+        tiprack_state = [True] * 96
+
+        pipette.reset_tipracks()  # <- IMPORTANT, required to reset physical tip-tracking
+        protocol.comment("Tip rack refreshed and pipette tip tracking reset.")
+
     def add_color(
             color_slot: str | int,
             plate_well: str,
@@ -171,7 +195,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         """
         global tiprack_state
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
-            raise ValueError("Cannot add color to well; well is full.")
+            raise WellFullError("Cannot add color to well; well is full.")
 
         pick_up_tip()
         pipette.aspirate(volume, colors[color_slot])
@@ -186,6 +210,25 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.aspirate(volume/2, plate.labware[plate_well].bottom(z=81))
         pipette.dispense(volume/2, plate.labware[plate_well].bottom(z=81))
 
+        # Blowout the remaining liquid in the pipette
+        pipette.blow_out(plate.labware[plate_well].bottom(z=95))
+
+        return_tip()
+
+    def calibrate_96_well_plate() -> None:
+        """
+        Picks up a tip and moves it to A1 of the plate, pauses for 10 seconds,
+        then moves it to H12 of the plate, pauses for 10 seconds, and then returns the tip.
+        """
+        global tiprack_state
+        pick_up_tip()
+        pipette.touch_tip(plate.labware['A1'], v_offset=95, radius=0)
+        pipette.move_to(plate.labware['A1'].bottom(z=81))
+        time.sleep(10)
+        
+        pipette.touch_tip(plate.labware['H12'], v_offset=95, radius=0)
+        pipette.move_to(plate.labware['H12'].bottom(z=81))
+        time.sleep(10)
         return_tip()
 
     def close() -> None:
@@ -284,8 +327,17 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     turn_on_lights()
                 elif subaction_name == "turn_off_lights":
                     turn_off_lights()
+                elif subaction_name == "refresh_tiprack":
+                    refresh_tiprack()
                 elif subaction_name == "add_color":
-                    add_color(subaction_args["color_slot"], subaction_args["plate_well"], subaction_args["volume"])
+                    try:
+                        add_color(subaction_args["color_slot"], subaction_args["plate_well"], subaction_args["volume"])
+                    except WellFullError as e:
+                        return failed_to_run_actions(e)
+                    except TiprackEmptyError as e:
+                        return failed_to_run_actions(e)
+                elif subaction_name == "calibrate_96_well_plate":
+                    calibrate_96_well_plate()
                 elif subaction_name == "close":
                     close()
                     break
@@ -302,3 +354,21 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             json.dump(data, f)
         protocol.comment("args.jsonx updated. Waiting for next update...")
         protocol.comment("Ready")
+
+
+    def failed_to_run_actions(e: str) -> None:
+        """
+        Handle the case where the robot fails to run actions.
+
+        :param e: The error message.
+        """
+        # Set is_updated to False
+        data["is_updated"] = False
+        # Remove the actions key
+        data.pop("actions", None)
+
+        # Write the updated JSON back to the file
+        with open(get_filename('args.jsonx'), 'w') as f:
+            json.dump(data, f)
+        protocol.comment("args.jsonx updated. Waiting for next update...")
+        protocol.comment(f"Error: {e}. Waiting for next update...")

@@ -39,7 +39,7 @@ class ColorLearningOptimizer:
     def add_data(self, volumes: list, measured_color: list):
         self.X_train.append(volumes)
         self.Y_train.append(measured_color)
-        if self.optimization_mode == "mlp_active" and len(self.X_train) >= 5:
+        if self.optimization_mode == "mlp_active" and len(self.X_train) >= 2:
             for model in self.models:
                 model.fit(self.X_train, self.Y_train)
 
@@ -56,8 +56,11 @@ class ColorLearningOptimizer:
             raise ValueError(f"Unknown optimization mode: {self.optimization_mode}")
         return volumes
 
-    def calculate_distance(self, color: list, target_color: list) -> float:
-        return math.sqrt(sum((c1 - c2) ** 2 for c1, c2 in zip(color, target_color)))
+    def calculate_distance(self, color, target_color) -> float:
+        return math.sqrt(
+            sum((int(c1) - int(c2)) ** 2 for c1, c2 in zip(color, target_color))
+        )
+
 
     def within_tolerance(self, color: list, target_color: list) -> bool:
         return self.calculate_distance(color, target_color) <= self.tolerance
@@ -115,7 +118,7 @@ class ColorLearningOptimizer:
         return adjusted
 
     def _mlp_active_optimize(self, target_rgb: list) -> list:
-        if len(self.X_train) < 5:
+        if len(self.X_train) < 2:
             return self._random_combination()
 
         candidates = [self._random_combination() for _ in range(200)]
