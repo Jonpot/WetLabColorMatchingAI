@@ -125,10 +125,11 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 protocol.comment(f"Using tip {color_slot_well} for color slot {color_slot}.")
                 tiprack_state[color_slot_well] = False
 
-                # At this point, this color slot has a dedicated tip assigned to it.
-                # Pick up this tip
-                pipette.pick_up_tip(location=pipette.tip_racks[0].well(color_slot_well))
-                return
+            # At this point, this color slot has a dedicated tip assigned to it.
+            # Pick up this tip
+            protocol.comment(f"Picking up tip {color_slot_well} for color slot {color_slot}. Exact arg: {pipette.tip_racks[0].wells()[color_slot_well]}")
+            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[color_slot_well])
+            return
             
 
         try:
@@ -164,10 +165,10 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 return 
             
             color_slot_well = reduced_tips_info[color_slot]
-            protocol.comment(f"Returning tip {color_slot_well} to color slot {color_slot}.")
-            pipette.return_tip(location=pipette.tip_racks[0].well(color_slot_well))
-
-        pipette.drop_tip()
+            protocol.comment(f"Returning tip to tipbox slot {color_slot_well}.")
+            pipette.return_tip()
+        else:
+            pipette.drop_tip()
 
 
     ### CALLABLE FUNCTIONS ###
@@ -273,7 +274,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         if reduced_tips_info is not None:
             for color_slot, tip in reduced_tips_info.items():
                 protocol.comment(f"Returning tip {tip} to trash for color slot {color_slot}.")
-                pipette.pick_up_tip(locations=pipette.tip_racks[0].well(tip))
+                pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[tip])
                 pipette.drop_tip()
 
         with open(get_filename('color_matching_tiprack.jsonx'), 'w') as f:
