@@ -20,7 +20,8 @@ class ColorLearningOptimizer:
                  initial_explore_count: int = 0,
                  initial_force_all_dyes: bool = False,
                  candidate_num: int = 300,
-                 single_row_learning: bool = True,):
+                 single_row_learning: bool = True
+                 global_iteration_count: int = 0):
         self.dye_count = dye_count
         self.max_well_volume = max_well_volume
         self.step = step
@@ -33,6 +34,8 @@ class ColorLearningOptimizer:
         self.initial_force_all_dyes = initial_force_all_dyes
         self.candidate_num = candidate_num
         self.single_row_learning = single_row_learning
+        self.global_iteration_count = global_iteration_count
+        
 
 
         self.X_train = []
@@ -42,20 +45,61 @@ class ColorLearningOptimizer:
             self.models = [MLPRegressor(hidden_layer_sizes=(32, 32), max_iter=5000, random_state=42+i) for i in range(self.n_models)]
 
     def _forced_full_dye_combination(self) -> list:
-        vols = [self.min_required_volume] * self.dye_count
-        total = sum(vols)
-        scale = self.max_well_volume / total
-        vols = [int(v * scale) for v in vols]
+        """
+        Return one of two maximally different full-dye combinations (used for initial exploration).
+        """
+        if not hasattr(self, "_forced_combo_pair"):
+            self._forced_combo_pair = self._generate_two_distinct_combos()
+            self._forced_combo_index = 0
 
-        diff = self.max_well_volume - sum(vols)
-        if diff != 0:
-            vols[np.argmax(vols)] += diff
-        return vols
+        combo = self._forced_combo_pair[self._forced_combo_index]
+        self._forced_combo_index = (self._forced_combo_index + 1) % 2
+        return combo
     
+
+    def _generate_two_distinct_combos(self) -> list[list[int]]:
+        """
+        Generate two full-dye combinations that are as far apart as possible.
+        """
+        max_trials = 1000
+        best_pair = None
+        best_dist = -1
+
+        candidates = []
+        for _ in range(max_trials):
+            weights = np.random.dirichlet(alpha=[1.0] * self.dye_count)
+            min_frac = self.min_required_volume / self.max_well_volume
+            if np.any(weights < min_frac):
+                continue
+            vols = [int(w * self.max_well_volume) for w in weights]
+            diff = self.max_well_volume - sum(vols)
+            if diff != 0:
+                vols[np.argmax(vols)] += diff
+            if any(v < self.min_required_volume for v in vols):
+                continue
+            candidates.append(vols)
+            if len(candidates) >= 50:
+                break  # early stop once we have enough candidates
+
+        for i in range(len(candidates)):
+            for j in range(i+1, len(candidates)):
+                d = np.linalg.norm(np.array(candidates[i]) - np.array(candidates[j]))
+                if d > best_dist:
+                    best_dist = d
+                    best_pair = [candidates[i], candidates[j]]
+
+        if best_pair is None:
+            raise RuntimeError("Failed to generate distinct full-dye combinations.")
+
+        return best_pair
+
+
     def reset(self):
         if self.single_row_learning:
             self.X_train = []
             self.Y_train = []
+            self.global_iteration_count = 0  # reset per row
+
 
 
     def add_data(self, volumes: list, measured_color: list):
@@ -66,20 +110,42 @@ class ColorLearningOptimizer:
                 model.fit(self.X_train, self.Y_train)
 
     def suggest_next_experiment(self, target_color: list) -> list:
-        if self.initial_force_all_dyes and self.initial_explore_count < 2:
-            self.initial_explore_count += 1
-            return self._forced_full_dye_combination()
+        self.global_iteration_count += 1
+
+        def should_use_initial_combo():
+            if self.single_row_learning:
+                # Apply per row
+                return self.global_iteration_count <= 2
+            else:
+                # Only apply for very first 2 suggestions (first row only)
+                return len(self.X_train) < 2
+
+        if should_use_initial_combo():
+            if self.initial_force_all_dyes:
+                # Use maximally different full-dye combos
+                if not hasattr(self, "_forced_combo_pair"):
+                    self._forced_combo_pair = self._generate_two_distinct_combos()
+                    self._forced_combo_index = 0
+
+                combo = self._forced_combo_pair[self._forced_combo_index]
+                self._forced_combo_index = (self._forced_combo_index + 1) % 2
+                return combo
+            else:
+                return self._random_combination()
+
+        # Proceed with optimizer
         if self.optimization_mode == "mlp_active":
-            volumes = self._mlp_active_optimize(target_color)
+            return self._mlp_active_optimize(target_color)
         elif self.optimization_mode == "unmixing":
-            volumes = self._color_unmixing_optimize(target_color)
+            return self._color_unmixing_optimize(target_color)
         elif self.optimization_mode == "random_forest":
-            volumes = self._random_forest_optimize(target_color)
+            return self._random_forest_optimize(target_color)
         elif self.optimization_mode == "extratree_active":
-            volumes = self._extratree_active_optimize(target_color)
+            return self._extratree_active_optimize(target_color)
         else:
             raise ValueError(f"Unknown optimization mode: {self.optimization_mode}")
-        return volumes
+
+
 
     def calculate_distance(self, color, target_color) -> float:
         return math.sqrt(
