@@ -62,12 +62,12 @@ try:
         tolerance=TOLERANCE,
         min_required_volume=20,
         optimization_mode="mlp_active",
-        n_models = 5,
+        n_models = 5, # Only for MLP, number of models to train
         exploration_weight = 1.0,
         initial_explore_count = 0,
-        initial_force_all_dyes = False,
-        candidate_num = 300
-        single_row_learning = True,
+        initial_force_all_dyes = False, # Randomly select all dyes for the first few iterations
+        candidate_num = 300, # Number of candidate points to sample
+        single_row_learning = True # If True, only one row will be used for training
     )
 
     # initial camera capture
