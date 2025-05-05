@@ -3,7 +3,7 @@ import json
 import time
 import paramiko
 from scp import SCPClient
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import threading
 
 class WellFullError(Exception):
@@ -16,7 +16,13 @@ class TiprackEmptyError(Exception):
 
 
 class OT2Manager:
-    def __init__(self, hostname: str, username: str, password: str, key_filename: str, virtual_mode: bool = False) -> None:
+    def __init__(self,
+                 hostname: str,
+                 username: str,
+                 password: str,
+                 key_filename: str,
+                 virtual_mode: bool = False,
+                 reduced_tips_info: None | int = None) -> None:
         self.virtual_mode = virtual_mode
         self.last_error_type = None
         if not self.virtual_mode:
@@ -43,7 +49,7 @@ class OT2Manager:
                 sys.exit(1)
 
             # Initialize the args file and a flag to indicate when the remote process signals completion
-            self.args = {"is_updated": False, "actions": []}
+            self.args = {"is_updated": False, "actions": [], "reduced_tips_info": reduced_tips_info}
             self.finished_flag = False
             self.error_flag = False
             self._save_args_to_file("args.jsonx")
