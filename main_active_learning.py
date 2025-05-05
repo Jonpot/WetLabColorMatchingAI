@@ -62,6 +62,12 @@ try:
         tolerance=TOLERANCE,
         min_required_volume=20,
         optimization_mode="mlp_active",
+        n_models = 5,
+        exploration_weight = 1.0,
+        initial_explore_count = 0,
+        initial_force_all_dyes = False,
+        candidate_num = 300
+        single_row_learning = True,
     )
 
     # initial camera capture
