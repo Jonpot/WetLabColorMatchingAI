@@ -171,6 +171,9 @@ class OT2Manager:
         to signal that it is ready for new instructions.
 
         ::raises RuntimeError: If an error is detected during the remote process execution.
+                               If this happens, it is useful to check the last_error_type attribute
+                               to determine the type of error that occurred, likely either a
+                               TiprackEmptyError or a WellFullError.
         """
         if self.virtual_mode:
             self.args["is_updated"] = False  # Reset the update flag for the next set of actions
