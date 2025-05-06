@@ -127,8 +127,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
             # At this point, this color slot has a dedicated tip assigned to it.
             # Pick up this tip
-            protocol.comment(f"Picking up tip {color_slot_well} for color slot {color_slot}. Exact arg: {pipette.tip_racks[0].wells()[color_slot_well]}")
-            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[color_slot_well])
+            protocol.comment(f"Picking up tip {reduced_tips_info[color_slot]} for color slot {color_slot}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]]}")
+            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]])
             return
             
 
