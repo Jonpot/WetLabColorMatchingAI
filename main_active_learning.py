@@ -66,7 +66,7 @@ try:
         exploration_weight = 1.0,
         initial_explore_count = 0,
         initial_force_all_dyes = False,
-        candidate_num = 300
+        candidate_num = 300,
         single_row_learning = True,
     )
 
@@ -118,6 +118,11 @@ try:
                                 plate_well=well_coordinate,
                                 volume=volume,
                             )
+                    robot.add_mix_action(
+                        plate_well=well_coordinate,
+                        volume=MAX_WELL_VOLUME,
+                        repetitions=3,
+                    )
                     robot.execute_actions_on_remote()
                     break  # success, break the while loop
                 except RuntimeError:
