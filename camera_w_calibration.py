@@ -410,7 +410,7 @@ if __name__ == "__main__":
     # robot.add_turn_on_lights_action()
     # robot.execute_actions_on_remote()
 
-    corr = PlateProcessor().process_image(cam_index=0, force_ui=True)
+    corr = PlateProcessor().process_image(cam_index=2, force_ui=True)
 
     # robot.add_turn_off_lights_action()
     # robot.add_close_action()

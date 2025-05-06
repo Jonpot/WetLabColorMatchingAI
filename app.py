@@ -3,6 +3,8 @@ import streamlit as st
 import numpy as np
 from ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
 from camera_w_calibration import PlateProcessor
+import matplotlib.pyplot as plt
+import time
 
 # ——— CONFIG ———
 COLOR_THRESHOLD = 30
@@ -13,30 +15,42 @@ FIRST_GUESS_COL = 2
 MAX_GUESSES = MAX_WELLS_PER_ROW - 1  # 11
 MIN_VOL = 20
 MAX_VOL_SUM = 200
+CAM_INDEX = 2  # camera index for the plate processor
 
 # Example available color slots
 color_slots = ["7", "8", "9"]
 
+FORCE_REMOTE = True  # set to True to force remote connection
 
 # ——— SESSION INIT ———
 if "robot" not in st.session_state:
-    try:
+    if not FORCE_REMOTE:
         st.session_state.robot = OT2Manager(
             hostname="169.254.122.0",
             username="root",
             key_filename="secret/ot2_ssh_key",
             password="lemos",
-            reduced_tips_info=3,
-            virtual_mode=True
+            reduced_tips_info=4,
+            virtual_mode=False,
+            bypass_startup_key = True
         )
-    except Exception:
+    else:
         # fallback remote
         st.session_state.robot = OT2Manager(
             hostname="172.26.192.201",
             username="root",
             key_filename="secret/ot2_ssh_key_remote",
             password=None,
+            reduced_tips_info=4,
+            bypass_startup_key = True
         )
+
+    st.session_state.robot.add_turn_on_lights_action()
+    st.session_state.robot.execute_actions_on_remote()
+
+    print("Lights turned on.")
+    time.sleep(2)  # wait for lights to stabilize
+
     st.session_state.processor = PlateProcessor()
 
 # track how many guesses we've made per row, and the measured RGBs+distances
@@ -50,20 +64,40 @@ st.markdown(
     """
 1. Mystery color is in column 1 of the selected row.  
 2. Enter a “recipe” (volumes for each color slot) and click **Make recipe**.  
-3. The robot will pipette it, we’ll photograph it, and you’ll see your guess’s RGB + distance from target.  
+3. The robot will pipette it, we'll photograph it, and you'll see your guess's RGB + distance from target.  
 """
 )
 
 row = st.selectbox("Select row", ROWS)
 
-# Reset row display (re-read camera) if they switch rows
+# ——— ROW SWITCH: re-read plate & prepopulate history ———
 if st.session_state.get("last_row") != row:
     st.session_state.last_row = row
-    # read full plate once so we know the mystery color
-    full_plate = st.session_state.processor.process_image(cam_index=0)
-    # extract the target/mystery color for this row
-    myst_rgb = full_plate[ord(row) - ord("A"), MYSTERY_COL - 1]
+
+    # reset counters & history
+    st.session_state[f"guesses_{row}"] = 0
+    st.session_state[f"history_{row}"] = []
+
+    # snap the whole plate
+    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX)
+
+    # extract the mystery target
+    r_m, g_m, b_m = full_plate[ord(row) - ord("A"), MYSTERY_COL - 1]
+    myst_rgb = np.array([r_m, g_m, b_m])
     st.session_state[f"mystery_rgb_{row}"] = myst_rgb.tolist()
+
+    # now scan existing guesses in cols 2→12
+    prehist = []
+    for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
+        rgb = full_plate[ord(row) - ord("A"), col]
+        # white threshold:
+        if any(ch < 180 for ch in rgb):
+            dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
+            prehist.append((rgb.tolist(), dist))
+
+    # seed session_state
+    st.session_state[f"history_{row}"] = prehist
+    st.session_state[f"guesses_{row}"]  = len(prehist)
 
 st.markdown(f"**Mystery color (Col {MYSTERY_COL}) for row {row}:**")
 r, g, b = st.session_state[f"mystery_rgb_{row}"]
@@ -96,10 +130,11 @@ if not ok_sizes:
 if not ok_sum:
     st.warning(f"Total volume must be between {MIN_VOL} µL and {MAX_VOL_SUM} µL.")
 if not guesses_left:
-    st.info("You’ve used up all 11 guesses in this row.")
+    st.info("You've used up all 11 guesses in this row.")
 
 can_make = ok_sizes and ok_sum and guesses_left
 make_btn = st.button("Make recipe", disabled=not can_make)
+close_btn = st.button("Close robot")
 
 # ——— ACTION ———
 if make_btn:
@@ -107,15 +142,12 @@ if make_btn:
     target_well = f"{row}{FIRST_GUESS_COL + guess_index - 1}"
 
     robot = st.session_state.robot
-    robot.add_turn_on_lights_action()
+    
     for slot, vol in volumes.items():
         if vol > 0:
             robot.add_add_color_action(color_slot=slot,
                                        plate_well=target_well,
                                        volume=int(vol))
-    robot.add_turn_off_lights_action()
-    robot.add_close_action()
-
     try:
         robot.execute_actions_on_remote()
     except Exception as e:
@@ -123,7 +155,9 @@ if make_btn:
         st.stop()
 
     # photo & measure
-    full_plate = st.session_state.processor.process_image(cam_index=0)
+    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX)
+    # for debug: plot the full plate and all colors
+    #st.image(full_plate, caption="Full plate image", use_column_width=True)
     row_idx = ord(row) - ord("A")
     rgb = full_plate[row_idx, FIRST_GUESS_COL + guess_index - 2]
     myst = np.array(st.session_state[f"mystery_rgb_{row}"])
@@ -133,6 +167,15 @@ if make_btn:
     hist = st.session_state[f"history_{row}"]
     hist.append((rgb.tolist(), dist))
     st.session_state[f"guesses_{row}"] += 1
+
+if close_btn:
+    try:
+        st.session_state.robot.add_turn_off_lights_action()
+        st.session_state.robot.add_close_action()
+        st.session_state.robot.execute_actions_on_remote()
+    except Exception as e:
+        st.error(f"Robot error: {e}")
+        st.stop()
 
 # ——— DISPLAY HISTORY ———
 if st.session_state[f"history_{row}"]:
@@ -152,9 +195,24 @@ if st.session_state[f"history_{row}"]:
 
     # last distance & threshold
     last_dist = row_hist[-1][1]
-    color = "#d4f8d4" if last_dist < COLOR_THRESHOLD else "#f8d4d4"
+    color = "#d4f8d4" if last_dist < COLOR_THRESHOLD else "#f87474"
     st.markdown(
         f'<div style="padding:8px;background-color:{color};'
-        f'border-radius:4px">Distance from target: **{last_dist:.1f}**</div>',
+        f'border-radius:4px">Distance from target: {last_dist:.1f}</div>',
         unsafe_allow_html=True,
     )
+
+    # add a plot as distance vs. guess number
+    # pull out the distances
+    dists = [dist for (_, dist) in row_hist]
+
+    # build a simple line plot
+    fig, ax = plt.subplots()
+    ax.plot(range(1, len(dists) + 1), dists, marker='o')
+    ax.axhline(COLOR_THRESHOLD, linestyle='--')  # threshold line
+    ax.set_xlabel("Guess #")
+    ax.set_ylabel("Distance")
+    ax.set_title(f"Distance vs. Guess for row {row}")
+
+    st.pyplot(fig)
+    

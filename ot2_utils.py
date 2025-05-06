@@ -22,9 +22,11 @@ class OT2Manager:
                  password: str,
                  key_filename: str,
                  virtual_mode: bool = False,
-                 reduced_tips_info: None | int = None) -> None:
+                 reduced_tips_info: None | int = None,
+                 bypass_startup_key: bool = False) -> None:
         self.virtual_mode = virtual_mode
         self.last_error_type = None
+        self.reduced_tips_info = reduced_tips_info
         if not self.virtual_mode:
             # OT2 robot connection details
             self.hostname = hostname
@@ -49,7 +51,7 @@ class OT2Manager:
                 sys.exit(1)
 
             # Initialize the args file and a flag to indicate when the remote process signals completion
-            self.args = {"is_updated": False, "actions": [], "reduced_tips_info": reduced_tips_info}
+            self.args = {"is_updated": False, "actions": [], "reduced_tips_info": self.reduced_tips_info}
             self.finished_flag = False
             self.error_flag = False
             self._save_args_to_file("args.jsonx")
@@ -57,7 +59,8 @@ class OT2Manager:
             self._start_robot_listener()
             self._listen_for_completion()
         print("OT2Manager initialized and ready.")
-        input("Press Enter to continue and run the protocol...")
+        if not bypass_startup_key:
+            input("Press Enter to continue and run the protocol...")
 
 
     def _upload_file(self, local_path: str) -> None:
