@@ -127,8 +127,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
             # At this point, this color slot has a dedicated tip assigned to it.
             # Pick up this tip
-            protocol.comment(f"Picking up tip {color_slot_well} for color slot {color_slot}. Exact arg: {pipette.tip_racks[0].wells()[color_slot_well]}")
-            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[color_slot_well])
+            protocol.comment(f"Picking up tip {reduced_tips_info[color_slot]} for color slot {color_slot}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]]}")
+            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]])
             return
             
 
@@ -234,16 +234,38 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         plate.wells[plate_well].volume += volume
 
-        # Quick mix (has to be manual because the default mix function doesn't work with the large adapter)
-        pipette.aspirate(volume/2, plate.labware[plate_well].bottom(z=80))
-        pipette.dispense(volume/2, plate.labware[plate_well].bottom(z=80))
-        pipette.aspirate(volume/2, plate.labware[plate_well].bottom(z=80))
-        pipette.dispense(volume/2, plate.labware[plate_well].bottom(z=80))
-
         # Blowout the remaining liquid in the pipette
         pipette.blow_out(plate.labware[plate_well].bottom(z=95))
 
         return_tip(color_slot)
+    
+    def mix(
+            plate_well: str | int,
+            volume: float,
+            repititions: int) -> None:
+        """
+        Mixes the contents of a well.
+
+        :param plate_well: The well of the plate to mix.
+        :param volume: The volume to mix.
+        :param repititions: The number of times to mix.
+        """
+        global tiprack_state, reduced_tips_info
+
+        pick_up_tip("mix") # dedicated tip for mixing
+
+        pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
+        # Quick mix (has to be manual because the default mix function doesn't work with the large adapter)
+        for _ in range(repititions):
+            pipette.aspirate(volume, plate.labware[plate_well].bottom(z=80))
+            pipette.dispense(volume, plate.labware[plate_well].bottom(z=80))
+
+        # Blowout the remaining liquid in the pipette
+        pipette.blow_out(plate.labware[plate_well].bottom(z=95))
+
+        return_tip("mix")
+
+
 
     def calibrate_96_well_plate() -> None:
         """
@@ -397,6 +419,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                         return failed_to_run_actions(e)
                     except TiprackEmptyError as e:
                         return failed_to_run_actions(e)
+                elif subaction_name == "mix":
+                    mix(subaction_args["plate_well"], subaction_args["volume"], subaction_args["repetitions"])
                 elif subaction_name == "calibrate_96_well_plate":
                     calibrate_96_well_plate()
                 elif subaction_name == "close":
