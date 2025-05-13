@@ -223,6 +223,10 @@ class OT2Manager:
         """Queue an add color action."""
         self._add_action("add_color", {"color_slot": color_slot, "plate_well": plate_well, "volume": volume})
 
+    def add_mix_action(self, plate_well: str, volume: float = 100, repititions: int = 3) -> None:
+        """Queue a mix action."""
+        self._add_action("mix", {"plate_well": plate_well, "volume": volume, "repetitions": repititions})
+
     def __del__(self) -> None:
         # Close the SSH connection when the object is deleted.
         if self.ssh:

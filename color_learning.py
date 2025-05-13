@@ -16,7 +16,11 @@ class ColorLearningOptimizer:
                  min_required_volume: int = 20,
                  optimization_mode: str = "mlp_active",
                  n_models: int = 5,
-                 exploration_weight: float = 1.0):
+                 exploration_weight: float = 1.0,
+                 initial_explore_count: int = 0,
+                 initial_force_all_dyes: bool = False,
+                 candidate_num: int = 300,
+                 single_row_learning: bool = True,):
         self.dye_count = dye_count
         self.max_well_volume = max_well_volume
         self.step = step
@@ -25,6 +29,11 @@ class ColorLearningOptimizer:
         self.optimization_mode = optimization_mode
         self.n_models = n_models
         self.exploration_weight = exploration_weight
+        self.initial_explore_count = initial_explore_count
+        self.initial_force_all_dyes = initial_force_all_dyes
+        self.candidate_num = candidate_num
+        self.single_row_learning = single_row_learning
+
 
         self.X_train = []
         self.Y_train = []
@@ -32,9 +41,22 @@ class ColorLearningOptimizer:
         if self.optimization_mode == "mlp_active":
             self.models = [MLPRegressor(hidden_layer_sizes=(32, 32), max_iter=5000, random_state=42+i) for i in range(self.n_models)]
 
+    def _forced_full_dye_combination(self) -> list:
+        vols = [self.min_required_volume] * self.dye_count
+        total = sum(vols)
+        scale = self.max_well_volume / total
+        vols = [int(v * scale) for v in vols]
+
+        diff = self.max_well_volume - sum(vols)
+        if diff != 0:
+            vols[np.argmax(vols)] += diff
+        return vols
+    
     def reset(self):
-        self.X_train = []
-        self.Y_train = []
+        if self.single_row_learning:
+            self.X_train = []
+            self.Y_train = []
+
 
     def add_data(self, volumes: list, measured_color: list):
         self.X_train.append(volumes)
@@ -44,6 +66,9 @@ class ColorLearningOptimizer:
                 model.fit(self.X_train, self.Y_train)
 
     def suggest_next_experiment(self, target_color: list) -> list:
+        if self.initial_force_all_dyes and self.initial_explore_count < 2:
+            self.initial_explore_count += 1
+            return self._forced_full_dye_combination()
         if self.optimization_mode == "mlp_active":
             volumes = self._mlp_active_optimize(target_color)
         elif self.optimization_mode == "unmixing":
@@ -121,7 +146,7 @@ class ColorLearningOptimizer:
         if len(self.X_train) < 2:
             return self._random_combination()
 
-        candidates = [self._random_combination() for _ in range(200)]
+        candidates = [self._random_combination() for _ in range(self.candidate_num)]
         candidates_np = np.array(candidates)
 
         all_preds = np.array([model.predict(candidates_np) for model in self.models])
@@ -152,7 +177,7 @@ class ColorLearningOptimizer:
             print(f"ExtraTrees training failed: {e}")
             return self._random_combination()
 
-        candidates = [self._random_combination() for _ in range(200)]
+        candidates = [self._random_combination() for _ in range(self.candidate_num)]
         X_candidates_scaled = scaler.transform(candidates)
 
         try:
@@ -188,7 +213,7 @@ class ColorLearningOptimizer:
             print(f"Random Forest training failed: {e}")
             return self._random_combination()
 
-        candidates = [self._random_combination() for _ in range(50)]
+        candidates = [self._random_combination() for _ in range(self.candidate_num)]
         X_candidates_scaled = scaler.transform(candidates)
 
         try:

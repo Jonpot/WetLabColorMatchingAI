@@ -7,6 +7,7 @@ Each suggested dye recipe within a row is unique.
 Logs Target RGB, Measured RGB, volumes, distance, training-set size,
 plus R2 and MSE to output.txt (flushed every iteration).
 """
+#https://cmu.zoom.us/j/95515112422?pwd=pP3XdZrWNkVzaaFfYs1gf8UJeax7iM.1
 
 import time
 from pathlib import Path
@@ -24,7 +25,8 @@ robot = OT2Manager(
     username="root",
     key_filename="secret/ot2_ssh_key_remote",
     password=None,
-    virtual_mode=False,
+    # virtual_mode=False,
+    # reduced_tips_info=3,
 )
 
 log_f = None
@@ -62,6 +64,12 @@ try:
         tolerance=TOLERANCE,
         min_required_volume=20,
         optimization_mode="mlp_active",
+        n_models = 5, # Only for MLP, number of models to train
+        exploration_weight = 1.0,
+        initial_explore_count = 0,
+        initial_force_all_dyes = True, # Randomly select all dyes for the first few iterations
+        candidate_num = 300, # Number of candidate points to sample
+        single_row_learning = True  # If True, only one row will be used for training
     )
 
     # initial camera capture
@@ -112,6 +120,11 @@ try:
                                 plate_well=well_coordinate,
                                 volume=volume,
                             )
+                    robot.add_mix_action(
+                        plate_well=well_coordinate,
+                        volume=MAX_WELL_VOLUME,
+                        repetitions=3,
+                    )
                     robot.execute_actions_on_remote()
                     break  # success, break the while loop
                 except RuntimeError:
