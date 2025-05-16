@@ -45,15 +45,19 @@ def create_replicate_linspace_recipe(start: int, end: int, num: int, color: str,
 
 def create_random_recipe(colors: list[str], total_volume: int = 200, min_volume: int = 20) -> dict[str, int]:
     """Create a random recipe for the given colors with a total volume of 200uL.
-    
     Note that while the default minimum volume is "20uL", that's only the minimum _if the color is present_.
     If the color is not present, it will be 0uL.
     """
     recipe = {}
     total_volume_remaining = total_volume
-    for color in colors:
-        if random.random() < 0.5:  # 50% chance to include the color
-            volume = random.randint(min_volume, total_volume_remaining)
+    for idx, color in enumerate(colors):
+        if random.random() < 0.5 and total_volume_remaining >= min_volume:
+            # Ensure we don't try to assign more than we have left
+            max_vol = total_volume_remaining - min_volume * (len(colors) - idx - 1)
+            if max_vol < min_volume:
+                volume = total_volume_remaining
+            else:
+                volume = random.randint(min_volume, max_vol)
             recipe[color] = volume
             total_volume_remaining -= volume
         else:
@@ -80,6 +84,8 @@ random.shuffle(protocol_recipes)
 # The measured columns will be filled in later
 df = pd.DataFrame(columns=["well", "red_vol", "green_vol", "blue_vol", "water_vol", "measured_red", "measured_green", "measured_blue"])
 
+# Collect rows for batch DataFrame creation (for efficiency)
+df_rows = []
 for i, recipe in enumerate(protocol_recipes):
     row = plate_rows_letters[i // 12]
     col = plate_col_letters[i % 12]
@@ -96,8 +102,7 @@ for i, recipe in enumerate(protocol_recipes):
         volume=100,
         repetitions=3,
     )
-
-    df.loc[i] = [
+    df_rows.append([
         well,
         recipe.get("red", 0),
         recipe.get("green", 0),
@@ -106,8 +111,10 @@ for i, recipe in enumerate(protocol_recipes):
         None,  # Placeholder for measured red
         None,  # Placeholder for measured green
         None,  # Placeholder for measured blue
-    ]
-
+    ])
+# Create DataFrame in one go
+if len(df_rows) > 0:
+    df = pd.DataFrame(df_rows, columns=df.columns)
 
 # Execute actions
 robot.execute_actions_on_remote()
@@ -117,22 +124,52 @@ measured_plate = processor.process_image(cam_index=CAM_INDEX)
 for i, recipe in enumerate(protocol_recipes):
     row = plate_rows_letters[i // 12]
     col = plate_col_letters[i % 12]
-    well = f"{row}{col}"
     row_idx = ord(row) - ord("A")
     col_idx = int(col) - 1
     rgb = measured_plate[row_idx, col_idx]
-    
     # Store the measured RGB values in the dataframe
     df.at[i, "measured_red"] = rgb[0]
     df.at[i, "measured_green"] = rgb[1]
     df.at[i, "measured_blue"] = rgb[2]
 
+# At this point, the user will turn the plate 180 degrees and take a picture of the plate
+# This reduces the systematic error of the camera and lighting conditions
+input("Please turn the plate 180 degrees. Press Enter to continue...")
+# Well A1 will now be H12, and H12 will be A1, and so on
+# Process the image again, and now append rows to the dataframe
+# For the "well" column, we will use the original well name with a "'" to mark it as "prime" 
+# (e.g., the first well that is read will literally be H12 because the plate is flipped, so we will call this
+# "H12'")
+measured_plate_prime = processor.process_image(cam_index=CAM_INDEX)
+prime_rows = []
+for i, recipe in enumerate(reversed(protocol_recipes)):
+    # Calculate the well index after rotation
+    rotated_index = 95 - i  # 0-based index for 96-well plate
+    row = plate_rows_letters[rotated_index // 12]
+    col = plate_col_letters[rotated_index % 12]
+    well = f"{row}{col}'"  # Mark as prime
+    row_idx = ord(row) - ord("A")
+    col_idx = int(col) - 1
+    rgb = measured_plate_prime[row_idx, col_idx]
+    # Collect new row for the rotated measurement
+    prime_rows.append([
+        well,
+        recipe.get("red", 0),
+        recipe.get("green", 0),
+        recipe.get("blue", 0),
+        recipe.get("water", 0),
+        rgb[0],
+        rgb[1],
+        rgb[2],
+    ])
+if len(prime_rows) > 0:
+    df_prime = pd.DataFrame(prime_rows, columns=df.columns)
+    df = pd.concat([df, df_prime], ignore_index=True)
 
 # Turn off lights and close connection
 robot.add_turn_off_lights_action()
 robot.add_close_action()
 robot.execute_actions_on_remote()
-
 
 # Save the dataframe to a CSV file
 df.to_csv("linspace_data.csv", index=False)
@@ -141,9 +178,6 @@ df.to_csv("linspace_data.csv", index=False)
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.colors as mcolors
-import matplotlib.cm as cm
-import matplotlib.patches as mpatches
-import matplotlib.lines as mlines
 import matplotlib.ticker as ticker
 
 # Set the color palette
@@ -154,13 +188,13 @@ cmap = mcolors.ListedColormap(palette)
 fig, ax = plt.subplots(figsize=(12, 8))
 # Create a scatter plot for the measured colors
 for i, color in enumerate(["red", "green", "blue"]):
-    ax.scatter(df[f"measured_{color}"], df[f"measured_{color}"], color=palette[i], label=color, alpha=0.5)
+    ax.scatter(df[f"red_vol"], df[f"measured_{color}"], color=palette[i], label=color, alpha=0.5)
 # Set the axis labels and title
-ax.set_xlabel("Measured Red")
-ax.set_ylabel("Measured Green")
-ax.set_title("Measured Colors")
+ax.set_xlabel("Recipe Volume (uL)")
+ax.set_ylabel("Measured Color Value")
+ax.set_title("Measured Color vs. Recipe Volume")
 # Set the x and y axis limits
-ax.set_xlim(0, 255)
+ax.set_xlim(0, 200)
 ax.set_ylim(0, 255)
 # Set the x and y axis ticks
 ax.xaxis.set_major_locator(ticker.MultipleLocator(50))
@@ -175,21 +209,16 @@ plt.show()
 plt.savefig("measured_colors.png", dpi=300)
 
 # Create a heatmap of the measured colors
-fig, ax = plt.subplots(figsize=(12, 8))
-# Create a heatmap for the measured colors
-for x_color, y_color in zip(["red", "green", "blue"], ["green", "blue", "red"]):
-    heatmap_data = df.pivot("well", f"measured_{x_color}", f"measured_{y_color}")
-    sns.heatmap(heatmap_data, cmap=cmap, annot=True, fmt=".1f", cbar_kws={"label": f"Measured Color Value between {x_color} and {y_color}"}, ax=ax, linewidths=0.5)
-    # Set the axis labels and title
-    ax.set_xlabel(f"Measured {x_color}")
-    ax.set_ylabel(f"Measured {y_color}")
-    ax.set_title(f"Measured Colors Heatmap: {x_color} vs {y_color}")
-    # Set the x and y axis limits
-    ax.set_xlim(0, 200)
-    ax.set_ylim(0, 200)
-    # Add a grid
-    ax.grid(True, linestyle='--', alpha=0.5)
-    # Show the plot
-    plt.show()
-    # Save the plot
-    plt.savefig(f"measured_colors_heatmap_{x_color}_{y_color}.png", dpi=300)
+# (Commented out, as the pivot logic is likely to fail or be misleading)
+# fig, ax = plt.subplots(figsize=(12, 8))
+# for x_color, y_color in zip(["red", "green", "blue"], ["green", "blue", "red"]):
+#     heatmap_data = df.pivot("well", f"measured_{x_color}", f"measured_{y_color}")
+#     sns.heatmap(heatmap_data, cmap=cmap, annot=True, fmt=".1f", cbar_kws={"label": f"Measured Color Value between {x_color} and {y_color}"}, ax=ax, linewidths=0.5)
+#     ax.set_xlabel(f"Measured {x_color}")
+#     ax.set_ylabel(f"Measured {y_color}")
+#     ax.set_title(f"Measured Colors Heatmap: {x_color} vs {y_color}")
+#     ax.set_xlim(0, 200)
+#     ax.set_ylim(0, 200)
+#     ax.grid(True, linestyle='--', alpha=0.5)
+#     plt.show()
+#     plt.savefig(f"measured_colors_heatmap_{x_color}_{y_color}.png", dpi=300)
