@@ -14,7 +14,7 @@ color_slots = {"red": "7", "yellow": "8", "green": "9", "water": "11"}
 
 # Instantiate OT2Manager and PlateProcessor
 try:
-    robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None, reduced_tips_info=len(color_slots), virtual_mode=False)
+    robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None, reduced_tips_info=len(color_slots), virtual_mode=True)
 except Exception as e:
     print(f"Error initializing OT2Manager: {e}")
     robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None, reduced_tips_info=len(color_slots))
