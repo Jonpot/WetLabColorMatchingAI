@@ -27,6 +27,9 @@ class OT2Manager:
         self.virtual_mode = virtual_mode
         self.last_error_type = None
         self.reduced_tips_info = reduced_tips_info
+        self.args = {"is_updated": False, "actions": [], "reduced_tips_info": self.reduced_tips_info}
+        self.finished_flag = False
+        self.error_flag = False
         if not self.virtual_mode:
             # OT2 robot connection details
             self.hostname = hostname
@@ -51,9 +54,6 @@ class OT2Manager:
                 sys.exit(1)
 
             # Initialize the args file and a flag to indicate when the remote process signals completion
-            self.args = {"is_updated": False, "actions": [], "reduced_tips_info": self.reduced_tips_info}
-            self.finished_flag = False
-            self.error_flag = False
             self._save_args_to_file("args.jsonx")
             self._upload_file("args.jsonx")
             self._start_robot_listener()
@@ -223,12 +223,14 @@ class OT2Manager:
         """Queue an add color action."""
         self._add_action("add_color", {"color_slot": color_slot, "plate_well": plate_well, "volume": volume})
 
-    def add_mix_action(self, plate_well: str, volume: float = 100, repititions: int = 3) -> None:
+    def add_mix_action(self, plate_well: str, volume: float = 100, repetitions: int = 3) -> None:
         """Queue a mix action."""
-        self._add_action("mix", {"plate_well": plate_well, "volume": volume, "repetitions": repititions})
+        self._add_action("mix", {"plate_well": plate_well, "volume": volume, "repetitions": repetitions})
 
     def __del__(self) -> None:
         # Close the SSH connection when the object is deleted.
-        if self.ssh:
+        try:
             self.ssh.close()
             print("SSH connection closed.")
+        except Exception as e:
+            print(f"Error closing SSH connection: {e}")

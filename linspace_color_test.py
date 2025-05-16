@@ -10,11 +10,11 @@ plate_rows_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
 plate_col_letters = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
 
 # Define color slots
-color_slots = {"red": "7", "green": "8", "blue": "9", "water": "11"}
+color_slots = {"red": "7", "yellow": "8", "green": "9", "water": "11"}
 
 # Instantiate OT2Manager and PlateProcessor
 try:
-    robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None, reduced_tips_info=len(color_slots))
+    robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None, reduced_tips_info=len(color_slots), virtual_mode=False)
 except Exception as e:
     print(f"Error initializing OT2Manager: {e}")
     robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None, reduced_tips_info=len(color_slots))
@@ -70,11 +70,11 @@ def create_random_recipe(colors: list[str], total_volume: int = 200, min_volume:
 # With 3 primary colors, this will 4*4*3 = 48 wells
 # Then, with the remaining 48 wells, create random recipes 
 protocol_recipes = []
-for color in ["red", "green", "blue"]:
-    protocol_recipes.extend(create_replicate_linspace_recipe(0, 200, 4, color, total_volume=200, replicates=4))
+for color in ["red", "yellow", "green"]:
+    protocol_recipes.extend(create_replicate_linspace_recipe(20, 200, 4, color, total_volume=200, replicates=4))
 # Add random recipes for the remaining wells
 for _ in range(48):
-    protocol_recipes.append(create_random_recipe(["red", "green", "blue"], total_volume=200, min_volume=20))
+    protocol_recipes.append(create_random_recipe(["red", "yellow", "green"], total_volume=200, min_volume=20))
 
 # Now, randomly shuffle the recipes then add them to the plate
 random.shuffle(protocol_recipes)
@@ -82,7 +82,7 @@ random.shuffle(protocol_recipes)
 # df will include the following columns:
 # well, red_vol, green_vol, blue_vol, water_vol, measured_red, measured_green, measured_blue
 # The measured columns will be filled in later
-df = pd.DataFrame(columns=["well", "red_vol", "green_vol", "blue_vol", "water_vol", "measured_red", "measured_green", "measured_blue"])
+df = pd.DataFrame(columns=["well", "red_vol", "yellow_vol", "green_vol", "water_vol", "measured_red", "measured_green", "measured_blue"])
 
 # Collect rows for batch DataFrame creation (for efficiency)
 df_rows = []
@@ -91,9 +91,9 @@ for i, recipe in enumerate(protocol_recipes):
     col = plate_col_letters[i % 12]
     well = f"{row}{col}"
     for color, volume in recipe.items():
-        if color in color_slots:
+        if color in color_slots and volume >= 20:
             robot.add_add_color_action(
-                color = color_slots[color],
+                color_slot = color_slots[color],
                 plate_well=well,
                 volume = volume,
             )
@@ -105,8 +105,8 @@ for i, recipe in enumerate(protocol_recipes):
     df_rows.append([
         well,
         recipe.get("red", 0),
+        recipe.get("yellow", 0),
         recipe.get("green", 0),
-        recipe.get("blue", 0),
         recipe.get("water", 0),
         None,  # Placeholder for measured red
         None,  # Placeholder for measured green
@@ -155,8 +155,8 @@ for i, recipe in enumerate(reversed(protocol_recipes)):
     prime_rows.append([
         well,
         recipe.get("red", 0),
+        recipe.get("yellow", 0),
         recipe.get("green", 0),
-        recipe.get("blue", 0),
         recipe.get("water", 0),
         rgb[0],
         rgb[1],
