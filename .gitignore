@@ -1,0 +1,8 @@
+# Byte-compiled / cache directories
+__pycache__/
+*.pyc
+
+# Generated result images and CSVs
+**/linear_results/**
+**/mix_results/**
+**/pca/**
