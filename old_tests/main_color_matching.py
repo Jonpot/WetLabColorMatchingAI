@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 from opentrons import protocol_api
+from ot2_utils import get_plate_type
 
 color_slots = ['7','8','9']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -98,14 +99,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         return colors, plate, pipette, tiprack_state, off_deck_tipracks
     
-    def get_plate_type() -> str:
-        """
-        Uses the attached camera to determine the type of plate being used.
-        """
-        raise NotImplementedError
-
-    #plate_type = get_plate_type()
-    plate_type = "corning_96_wellplate_360ul_flat" # TODO: Remove this line when get_plate_type is implemented.
+    plate_type = get_plate_type()
     colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type)
 
     def get_color() -> list[list[list[float]]]:

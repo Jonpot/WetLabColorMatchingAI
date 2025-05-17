@@ -6,6 +6,43 @@ from scp import SCPClient
 from typing import Any, Dict, List, Optional
 import threading
 
+
+def get_plate_type(calibration_file: str = "calibration.json") -> str:
+    """Return the labware name from the calibration file.
+
+    The camera calibration workflow writes the plate type to ``calibration.json``
+    as a numeric string (e.g. ``"96"``).  This helper converts that value into
+    the corresponding Opentrons labware name.  If the file does not exist or is
+    invalid, a 96-well plate is assumed.
+
+    Parameters
+    ----------
+    calibration_file:
+        Path to the calibration configuration produced by
+        ``camera_w_calibration.py``.
+
+    Returns
+    -------
+    str
+        Labware identifier suitable for ``ProtocolContext.load_labware``.
+    """
+
+    mapping = {
+        "12": "corning_12_wellplate_6.9ml_flat",
+        "24": "corning_24_wellplate_3.4ml_flat",
+        "48": "corning_48_wellplate_760ul_flat",
+        "96": "corning_96_wellplate_360ul_flat",
+    }
+
+    try:
+        with open(calibration_file, "r") as f:
+            cfg = json.load(f)
+            plate_key = str(cfg.get("plate_type", "96"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        plate_key = "96"
+
+    return mapping.get(plate_key, mapping["96"])
+
 class WellFullError(Exception):
     """Exception raised when a well is full."""
     pass
