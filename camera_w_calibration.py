@@ -258,7 +258,8 @@ class PlateProcessor:
 
     # ----------------------------- calibration UI -------------------------
     def run_ui(self, img: np.ndarray,
-               prev: dict | None) -> dict | None:
+               prev: dict | None,
+               default_plate: str = "96") -> dict | None:
         """Open the calibration UI; return calibration dict or None if cancel."""
         self.img_copy = img.copy()
         h, w = img.shape[:2]
@@ -288,7 +289,7 @@ class PlateProcessor:
         cv2.setMouseCallback(WIN, self.on_mouse)
 
         plate_idx = {"12": 0, "24": 1, "48": 2, "96": 3}.get(
-            (prev or {}).get("plate_type", "96"), 3)
+            (prev or {}).get("plate_type", default_plate), 3)
         cv2.createTrackbar("Plate", WIN, plate_idx, 3,
                            lambda v: self.update_win())
 
@@ -325,7 +326,8 @@ class PlateProcessor:
     def process_image(self, cam_index: int = 0,
                       snap: str = "snapshot.jpg",
                       calib: str = "calibration.json",
-                      force_ui: bool = False):
+                      force_ui: bool = False,
+                      plate_type: str | None = None):
         """Main workflow: snapshot → calibration → corrected RGB matrix."""
         self.snapshot(cam_index, snap)
 
@@ -334,8 +336,14 @@ class PlateProcessor:
             with open(calib) as f:
                 cfg = json.load(f)
 
-        if force_ui or cfg is None:
-            cfg = self.run_ui(cv2.imread(snap), cfg)
+        if plate_type:
+            if cfg is None:
+                cfg = {"plate_type": plate_type}
+            else:
+                cfg["plate_type"] = plate_type
+
+        if force_ui or cfg is None or plate_type:
+            cfg = self.run_ui(cv2.imread(snap), cfg, default_plate=cfg.get("plate_type", "96"))
             if cfg is None:
                 raise RuntimeError("Calibration cancelled")
             with open(calib, "w") as f:
@@ -405,13 +413,21 @@ class PlateProcessor:
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════
 if __name__ == "__main__":
-    from ot2_utils import OT2Manager
+    parser = argparse.ArgumentParser(description="Capture calibration data and generate colour-correction matrix")
+    parser.add_argument("--cam-index", type=int, default=0, help="Camera index")
+    parser.add_argument("--force-ui", action="store_true", help="Always show calibration UI")
+    parser.add_argument("--plate-type", choices=["12", "24", "48", "96"], help="Plate type/well count")
+    args = parser.parse_args()
+
+    corr = PlateProcessor().process_image(cam_index=args.cam_index,
+                                          force_ui=args.force_ui,
+                                          plate_type=args.plate_type)
+
+    # Example for remote OT-2 usage
+    # from ot2_utils import OT2Manager
     # robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None)
     # robot.add_turn_on_lights_action()
     # robot.execute_actions_on_remote()
-
-    corr = PlateProcessor().process_image(cam_index=2, force_ui=True)
-
     # robot.add_turn_off_lights_action()
     # robot.add_close_action()
     # robot.execute_actions_on_remote()

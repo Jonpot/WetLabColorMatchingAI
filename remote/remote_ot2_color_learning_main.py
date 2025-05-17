@@ -3,7 +3,8 @@ from pathlib import Path
 import sys
 from typing import Any, Dict, List, Tuple
 from opentrons import protocol_api
-import time 
+import time
+from ot2_utils import get_plate_type
 
 color_slots = ['4','5','6','7','8','9','10','11']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -308,8 +309,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     ### MAIN PROTOCOL ###
 
-    #plate_type = get_plate_type()
-    plate_type = "corning_96_wellplate_360ul_flat" # TODO: Remove this line when get_plate_type is implemented 
+    plate_type = get_plate_type()
     global tiprack_state, run_flag, reduced_tips_info
     reduced_tips_info = None
     protocol.comment("Loading labware and instruments...")
