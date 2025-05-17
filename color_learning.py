@@ -130,7 +130,10 @@ class ColorLearningOptimizer:
 
         total_vol = sum(adjusted)
         if total_vol == 0:
-            return self._random_combination()
+            # avoid infinite recursion when min_required_volume exceeds step
+            idx = random.randrange(self.dye_count)
+            adjusted[idx] = self.min_required_volume
+            total_vol = sum(adjusted)
 
         scale = self.max_well_volume / total_vol
         adjusted = [int(v * scale) for v in adjusted]
