@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Optional
 import threading
 
 
-def get_plate_type(calibration_file: str = "calibration.json") -> str:
+def get_plate_type(calibration_file: str = "camera/calibration.json") -> str:
     """Return the labware name from the calibration file.
 
-    The camera calibration workflow writes the plate type to ``calibration.json``
+    The camera calibration workflow writes the plate type to ``camera/calibration.json``
     as a numeric string (e.g. ``"96"``).  This helper converts that value into
     the corresponding Opentrons labware name.  If the file does not exist or is
     invalid, a 96-well plate is assumed.
@@ -92,7 +92,7 @@ class OT2Manager:
 
             # Initialize the args file and a flag to indicate when the remote process signals completion
             self._save_args_to_file("robot/args.jsonx")
-            self._upload_file("robot/args.jsonx")
+            self._upload_file("robot/args.jsonx", "args.jsonx")
             self._start_robot_listener()
             self._listen_for_completion()
         print("OT2Manager initialized and ready.")
@@ -100,12 +100,12 @@ class OT2Manager:
             input("Press Enter to continue and run the protocol...")
 
 
-    def _upload_file(self, local_path: str) -> None:
+    def _upload_file(self, local_path: str, filename: str) -> None:
         """Upload a file using SCP without closing the SSH connection."""
         try:
             print("Uploading file using SCP...")
             with SCPClient(self.ssh.get_transport()) as scp:
-                scp.put(local_path, remote_path=f"/root/{local_path}")
+                scp.put(local_path, remote_path=f"/root/{filename}")
             print(f"Uploaded '{local_path}' to /root/ on the OT2 robot.")
         except Exception as e:
             print(f"Error during file upload using SCP: {e}")
@@ -220,9 +220,10 @@ class OT2Manager:
             self.args["actions"] = []
             print("Running in virtual mode. Actions not executed on remote.")
             return  # Skip execution in virtual mode
-        filename = "robot/args.jsonx"
-        self._save_args_to_file(filename)
-        self._upload_file(filename)
+        filename = "args.jsonx"
+        filepath = f"robot/{filename}"
+        self._save_args_to_file(filepath)
+        self._upload_file(filepath, filename)
         try:
             self._listen_for_completion()
         except RuntimeError as e:
