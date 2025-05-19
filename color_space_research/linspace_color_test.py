@@ -206,7 +206,7 @@ ax.legend()
 # Show the plot
 plt.show()
 # Save the plot
-plt.savefig("measured_colors.png", dpi=300)
+plt.savefig("camera/measured_colors.png", dpi=300)
 
 # Create a heatmap of the measured colors
 # (Commented out, as the pivot logic is likely to fail or be misleading)

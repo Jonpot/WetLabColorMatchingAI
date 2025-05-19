@@ -66,7 +66,7 @@ class PlateProcessor:
 
     # ───────────────────────────── camera snapshot ────────────────────────
     @staticmethod
-    def snapshot(cam: int = 0, path: str = "snapshot.jpg",
+    def snapshot(cam: int = 0, path: str = "camera/snapshot.jpg",
                  warm: int = 10, burst: int = 5,
                  res: tuple[int, int] | None = (1600, 1200)) -> str:
         """Capture a denoised snapshot (burst average)."""
@@ -324,8 +324,8 @@ class PlateProcessor:
 
     # -------------------------- main processing ---------------------------
     def process_image(self, cam_index: int = 0,
-                      snap: str = "snapshot.jpg",
-                      calib: str = "calibration.json",
+                      snap: str = "camera/snapshot.jpg",
+                      calib: str = "camera/calibration.json",
                       force_ui: bool = False,
                       plate_type: str | None = None):
         """Main workflow: snapshot → calibration → corrected RGB matrix."""
@@ -365,7 +365,7 @@ class PlateProcessor:
         corr = self.apply_rpcc(np.array(raw, np.float32), M10)
 
         # Save corrected matrix to a file
-        corrected_matrix_file = "corrected_matrix.json"
+        corrected_matrix_file = "camera/corrected_matrix.json"
         with open(corrected_matrix_file, "w") as f:
             json.dump(corr.tolist(), f, indent=2)
         print(f"[Saved] Corrected matrix to {corrected_matrix_file}")
@@ -407,8 +407,8 @@ class PlateProcessor:
                        (centre[0] + SHIFT, centre[1]),
                        RADIUS, bgr_ref, -1)
 
-        cv2.imwrite("output_with_centers_corr.jpg", marked)
-        print("[Saved] output_with_centers_corr.jpg")
+        cv2.imwrite("camera/output_with_centers_corr.jpg", marked)
+        print("[Saved] camera/output_with_centers_corr.jpg")
         return corr
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════

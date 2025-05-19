@@ -30,6 +30,7 @@ def active_learn_row(
     row_letter: str,
     target_color: Iterable[int],
     color_slots: List[str],
+    cam_index: int = 0,
     max_iterations: int = 11,
     log_cb: Callable[[str], None] | None = None,
 ) -> List[List[int]]:
@@ -40,7 +41,7 @@ def active_learn_row(
     robot, processor, optimizer :
         Pre-initialised helpers controlling the OT-2 and camera.
     row_letter : str
-        Plate row identifier (``"A"``–``"H"``).
+        Plate row identifier (``"A"``-``"H"``).
     target_color : iterable of int
         The RGB target colour present in column 1.
     color_slots : list of str
@@ -89,7 +90,7 @@ def active_learn_row(
                         )
                 robot.add_mix_action(
                     plate_well=well_coordinate,
-                    volume=optimizer.max_well_volume,
+                    volume=optimizer.max_well_volume/2,
                     repetitions=3,
                 )
                 robot.execute_actions_on_remote()
@@ -97,14 +98,14 @@ def active_learn_row(
             except RuntimeError:
                 if robot.last_error_type == TiprackEmptyError:
                     if log_cb:
-                        log_cb("Tiprack empty – refreshing")
+                        log_cb("Tiprack empty - refreshing")
                     robot.add_refresh_tiprack_action()
                     robot.execute_actions_on_remote()
                 else:
                     raise
 
         # measure
-        color_data = processor.process_image(cam_index=0)
+        color_data = processor.process_image(cam_index=cam_index)
         measured_color = color_data[row_idx][column - 1]
         if log_cb:
             log_cb(f"Measured: {measured_color}")
@@ -139,6 +140,8 @@ def run_active_learning() -> None:
         password=None,
     )
 
+    CAM_INDEX = 2
+
     log_f = Path("output.txt").open("w", encoding="utf-8")
     log_f.write(
         "Row | Iter | TargetRGB | Volumes | MeasuredRGB | Dist | #Train | R2 | MSE\n"
@@ -166,7 +169,7 @@ def run_active_learning() -> None:
     )
 
     processor = PlateProcessor()
-    color_data = processor.process_image(cam_index=0)
+    color_data = processor.process_image(cam_index=CAM_INDEX)
 
     try:
         for row_letter in plate_rows:
