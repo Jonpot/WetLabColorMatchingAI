@@ -1,8 +1,8 @@
-from ot2_utils import OT2Manager
+from robot.ot2_utils import OT2Manager
 import numpy as np
 import random
 import pandas as pd
-from camera_w_calibration import PlateProcessor
+from camera.camera_w_calibration import PlateProcessor
 CAM_INDEX = 2  # camera index for the plate processor
 
 # Define plate rows and columns

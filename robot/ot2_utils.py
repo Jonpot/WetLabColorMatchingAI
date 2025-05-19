@@ -91,8 +91,8 @@ class OT2Manager:
                 sys.exit(1)
 
             # Initialize the args file and a flag to indicate when the remote process signals completion
-            self._save_args_to_file("args.jsonx")
-            self._upload_file("args.jsonx")
+            self._save_args_to_file("robot/args.jsonx")
+            self._upload_file("robot/args.jsonx")
             self._start_robot_listener()
             self._listen_for_completion()
         print("OT2Manager initialized and ready.")
@@ -220,7 +220,7 @@ class OT2Manager:
             self.args["actions"] = []
             print("Running in virtual mode. Actions not executed on remote.")
             return  # Skip execution in virtual mode
-        filename = "args.jsonx"
+        filename = "robot/args.jsonx"
         self._save_args_to_file(filename)
         self._upload_file(filename)
         try:

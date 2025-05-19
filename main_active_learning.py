@@ -14,10 +14,10 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.metrics import mean_squared_error, r2_score
-from ot2_utils import TiprackEmptyError
-from ot2_utils import OT2Manager
-from color_learning import ColorLearningOptimizer
-from camera_w_calibration import PlateProcessor
+from robot.ot2_utils import TiprackEmptyError
+from robot.ot2_utils import OT2Manager
+from active_learning.color_learning import ColorLearningOptimizer
+from camera.camera_w_calibration import PlateProcessor
 
 # ---------------- OT-2 connection ----------------
 robot = OT2Manager(

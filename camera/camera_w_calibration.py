@@ -3,10 +3,10 @@
 """
 camera_color24.py  ―  24-patch ColorChecker calibration pipeline
 ================================================================
-* UI shows 24 draggable dots – drop them onto the chart.
-* Supports 12 / 24 / 48 / 96 well plates (5 × 5 trimmed-mean sampling).
+* UI shows 24 draggable dots -x drop them onto the chart.
+* Supports 12 / 24 / 48 / 96 well plates (5 x 5 trimmed-mean sampling).
 * Saves / loads rectangle, 24 dots, plate type, brightness, contrast.
-* Learns a 3 × 10 **root-polynomial colour-correction matrix** each run.
+* Learns a 3 x 10 **root-polynomial colour-correction matrix** each run.
 * Generates a diagnostic image:
     ├ each well centre:   left-half = raw,    right-half = corrected
     └ each chart patch:   left-half = raw,    right-half = corrected,

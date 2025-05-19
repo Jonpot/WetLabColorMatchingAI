@@ -1,4 +1,4 @@
-from color_learning import ColorLearningOptimizer
+from active_learning.color_learning import ColorLearningOptimizer
 import numpy as np
 import time
 import random

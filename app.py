@@ -1,8 +1,8 @@
 # app.py
 import streamlit as st
 import numpy as np
-from ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
-from camera_w_calibration import PlateProcessor
+from robot.ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
+from camera.camera_w_calibration import PlateProcessor
 import matplotlib.pyplot as plt
 import time
 

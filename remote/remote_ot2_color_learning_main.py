@@ -4,7 +4,7 @@ import sys
 from typing import Any, Dict, List, Tuple
 from opentrons import protocol_api
 import time
-from ot2_utils import get_plate_type
+from robot.ot2_utils import get_plate_type
 
 color_slots = ['4','5','6','7','8','9','10','11']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'

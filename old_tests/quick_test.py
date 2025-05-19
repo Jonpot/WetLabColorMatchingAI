@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import sys
 from opentrons import protocol_api
-from ot2_utils import get_plate_type
+from robot.ot2_utils import get_plate_type
 
 color_slots = ['7','8','9']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'

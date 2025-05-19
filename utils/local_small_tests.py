@@ -1,4 +1,4 @@
-from ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
+from robot.ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
 
 try:
     robot = OT2Manager(hostname="169.254.122.0", username="root", key_filename="secret/ot2_ssh_key", password="lemos", reduced_tips_info=3)
