@@ -1,205 +1,200 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+"""Utility functions for running the colour learning pipeline.
+
+This module exposes ``run_active_learning`` which can be imported by
+external applications.  When executed directly it behaves like the old
+script and performs colour matching over a set of rows.
 """
-active_color_learning.py
-Row-by-row colour matching with an active-learning optimiser.
-Each suggested dye recipe within a row is unique.
-Logs Target RGB, Measured RGB, volumes, distance, training-set size,
-plus R2 and MSE to output.txt (flushed every iteration).
-"""
-#https://cmu.zoom.us/j/95515112422?pwd=pP3XdZrWNkVzaaFfYs1gf8UJeax7iM.1
+
+from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Iterable, List, Callable
 
 import numpy as np
 from sklearn.metrics import mean_squared_error, r2_score
-from robot.ot2_utils import TiprackEmptyError
-from robot.ot2_utils import OT2Manager
+
+from robot.ot2_utils import OT2Manager, TiprackEmptyError
 from active_learning.color_learning import ColorLearningOptimizer
 from camera.camera_w_calibration import PlateProcessor
 
-# ---------------- OT-2 connection ----------------
-robot = OT2Manager(
-    hostname="172.26.192.201",
-    username="root",
-    key_filename="secret/ot2_ssh_key_remote",
-    password=None,
-    # virtual_mode=False,
-    # reduced_tips_info=3,
-)
 
-log_f = None
+# ---------------------------------------------------------------------------
+# Core functionality
+# ---------------------------------------------------------------------------
 
-try:
-    # overwrite any previous log
+def active_learn_row(
+    robot: OT2Manager,
+    processor: PlateProcessor,
+    optimizer: ColorLearningOptimizer,
+    row_letter: str,
+    target_color: Iterable[int],
+    color_slots: List[str],
+    max_iterations: int = 11,
+    log_cb: Callable[[str], None] | None = None,
+) -> List[List[int]]:
+    """Actively learn a single plate row.
+
+    Parameters
+    ----------
+    robot, processor, optimizer :
+        Pre-initialised helpers controlling the OT-2 and camera.
+    row_letter : str
+        Plate row identifier (``"A"``–``"H"``).
+    target_color : iterable of int
+        The RGB target colour present in column 1.
+    color_slots : list of str
+        Identifiers of the dye reservoirs.
+    max_iterations : int, optional
+        Maximum number of guess iterations.  Defaults to 11.
+    log_cb : callable, optional
+        If provided, called with progress log lines.
+
+    Returns
+    -------
+    list of list of int
+        History of volume combinations trialled.
+    """
+
+    history: List[List[int]] = []
+    used_combos: set[tuple[int, ...]] = set()
+    row_idx = ord(row_letter) - ord("A")
+
+    current_iteration = 0
+    while current_iteration < max_iterations:
+        column = current_iteration + 2
+        well_coordinate = f"{row_letter}{column}"
+        if log_cb:
+            log_cb(f"{row_letter} | Iter {current_iteration + 1} | Well {well_coordinate}")
+
+        # unique recipe generation
+        while True:
+            volumes = optimizer.suggest_next_experiment(list(target_color))
+            if tuple(volumes) not in used_combos:
+                used_combos.add(tuple(volumes))
+                break
+
+        if log_cb:
+            log_cb(f"Suggested: {volumes}")
+
+        # pipette
+        while True:
+            try:
+                for i, volume in enumerate(volumes):
+                    if volume > 0:
+                        robot.add_add_color_action(
+                            color_slot=color_slots[i],
+                            plate_well=well_coordinate,
+                            volume=volume,
+                        )
+                robot.add_mix_action(
+                    plate_well=well_coordinate,
+                    volume=optimizer.max_well_volume,
+                    repetitions=3,
+                )
+                robot.execute_actions_on_remote()
+                break
+            except RuntimeError:
+                if robot.last_error_type == TiprackEmptyError:
+                    if log_cb:
+                        log_cb("Tiprack empty – refreshing")
+                    robot.add_refresh_tiprack_action()
+                    robot.execute_actions_on_remote()
+                else:
+                    raise
+
+        # measure
+        color_data = processor.process_image(cam_index=0)
+        measured_color = color_data[row_idx][column - 1]
+        if log_cb:
+            log_cb(f"Measured: {measured_color}")
+
+        optimizer.add_data(volumes, measured_color)
+        distance = optimizer.calculate_distance(measured_color, target_color)
+        if log_cb:
+            log_cb(f"Distance: {distance:.2f}")
+
+        history.append(volumes)
+        if optimizer.within_tolerance(measured_color, target_color):
+            if log_cb:
+                log_cb(f"Matched with {volumes}")
+            break
+
+        current_iteration += 1
+
+    return history
+
+
+# ---------------------------------------------------------------------------
+# Convenience entry point
+# ---------------------------------------------------------------------------
+
+def run_active_learning() -> None:
+    """Replicates the behaviour of the original script."""
+
+    robot = OT2Manager(
+        hostname="172.26.192.201",
+        username="root",
+        key_filename="secret/ot2_ssh_key_remote",
+        password=None,
+    )
+
     log_f = Path("output.txt").open("w", encoding="utf-8")
     log_f.write(
         "Row | Iter | TargetRGB | Volumes | MeasuredRGB | Dist | #Train | R2 | MSE\n"
     )
     log_f.flush()
 
-    # deck lights for imaging
     robot.add_blink_lights_action(num_blinks=3)
     robot.add_turn_on_lights_action()
     robot.execute_actions_on_remote()
 
-    # configuration
     color_slots = ["7", "8", "9"]
-    plate_rows_letters = ["A", "B", "C", "D", "E", "F", "G","H"]
-    # 1-index, including start and end
-    rows_start = 1
-    rows_end = 4
-    plate_rows = plate_rows_letters[(rows_start-1):rows_end]
-
-    MAX_WELL_VOLUME = 200
-    TOLERANCE = 15
-    MIN_STEP = 1
-    MAX_ITERATIONS = 11
+    plate_rows = ["A", "B", "C", "D"]
 
     optimizer = ColorLearningOptimizer(
         dye_count=len(color_slots),
-        max_well_volume=MAX_WELL_VOLUME,
-        step=MIN_STEP,
-        tolerance=TOLERANCE,
+        max_well_volume=200,
+        step=1,
+        tolerance=15,
         min_required_volume=20,
         optimization_mode="mlp_active",
-        n_models = 5, # Only for MLP, number of models to train
-        exploration_weight = 1.0,
-        initial_explore_count = 0,
-        initial_force_all_dyes = True, # Randomly select all dyes for the first few iterations
-        candidate_num = 300, # Number of candidate points to sample
-        single_row_learning = True  # If True, only one row will be used for training
+        n_models=5,
+        exploration_weight=1.0,
+        initial_force_all_dyes=True,
+        single_row_learning=True,
     )
 
-    # initial camera capture
     processor = PlateProcessor()
     color_data = processor.process_image(cam_index=0)
 
-    # main loop
-    for row_letter in plate_rows:
-        print(f"\nProcessing row {row_letter}")
-        optimizer.reset()
-        used_combos = set()
-
-        row_idx = ord(row_letter) - ord("A")
-        target_color = color_data[row_idx][0]
-        print(f"Target color: {target_color}")
-
-        current_iteration = 0
-        while current_iteration < MAX_ITERATIONS:
-            column = current_iteration + 2
-            well_coordinate = f"{row_letter}{column}"
-            print(f"Row {row_letter} | Iter {current_iteration + 1} | Well {well_coordinate}")
-
-            # unique recipe
-            while True:
-                volumes = optimizer.suggest_next_experiment(target_color)
-                if tuple(volumes) not in used_combos:
-                    used_combos.add(tuple(volumes))
-                    break
-
-            print(f"Suggested dye volumes: {volumes}")
-
-            # # queue pipetting
-            # for i, volume in enumerate(volumes):
-            #     if volume > 0:
-            #         robot.add_add_color_action(
-            #             color_slot=color_slots[i],
-            #             plate_well=well_coordinate,
-            #             volume=volume,
-            #         )
-            # robot.execute_actions_on_remote()
-            while True:
-                try:
-                    # Queue pipetting actions
-                    for i, volume in enumerate(volumes):
-                        if volume > 0:
-                            robot.add_add_color_action(
-                                color_slot=color_slots[i],
-                                plate_well=well_coordinate,
-                                volume=volume,
-                            )
-                    robot.add_mix_action(
-                        plate_well=well_coordinate,
-                        volume=MAX_WELL_VOLUME,
-                        repetitions=3,
-                    )
-                    robot.execute_actions_on_remote()
-                    break  # success, break the while loop
-                except RuntimeError:
-                    if robot.last_error_type == TiprackEmptyError:
-                        print("Tiprack empty detected. Refreshing tiprack and retrying...")
-                        robot.add_refresh_tiprack_action()
-                        robot.execute_actions_on_remote()
-                        print("Tiprack refreshed. Retrying pipetting...")
-                    else:
-                        # Some other error, not tiprack-related -> re-raise
-                        raise
-
-
-            # optional diffusion delay
-            # time.sleep(3)
-
-            # measure colour
-            color_data = processor.process_image(cam_index=0)
-            measured_color = color_data[row_idx][column - 1]
-            print(f"Measured color: {measured_color}")
-
-            # feed optimiser
-            optimizer.add_data(volumes, measured_color)
-
-            # distance to target
-            distance = optimizer.calculate_distance(measured_color, target_color)
-            print(f"Distance to target: {distance:.2f}")
-
-            # metrics
-            if (
-                optimizer.optimization_mode == "mlp_active"
-                and len(optimizer.X_train) >= 2           # same threshold used in add_data
-                and all(hasattr(m, "coefs_") for m in optimizer.models)
-            ):
-                preds = np.mean(
-                    [m.predict(optimizer.X_train) for m in optimizer.models],
-                    axis=0,
-                )
-                mse_val = mean_squared_error(optimizer.Y_train, preds)
-                r2_val = r2_score(optimizer.Y_train, preds)
-            else:
-                mse_val = float("nan")
-                r2_val = float("nan")
-
-            # log entry
-            log_f.write(
-                f"{row_letter} | {current_iteration + 1} | {target_color} | "
-                f"{volumes} | {measured_color} | {distance:.2f} | "
-                f"{len(optimizer.X_train)} | {r2_val:.4f} | {mse_val:.2f}\n"
-            )
-            log_f.flush()
-
-            if optimizer.within_tolerance(measured_color, target_color):
-                print(f"Target matched for row {row_letter}. Recipe: {volumes}")
-                log_f.write(
-                    f"Row {row_letter} matched with recipe {volumes}\n"
-                )
-                log_f.flush()
-                break
-
-            current_iteration += 1
-
-    print("\nColour matching complete.")
-
-except KeyboardInterrupt:
-    print("\nInterrupted by user. Shutting down...")
-
-finally:
     try:
+        for row_letter in plate_rows:
+            optimizer.reset()
+            target_color = color_data[ord(row_letter) - ord("A")][0]
+            def logger(msg: str) -> None:
+                print(msg)
+                log_f.write(msg + "\n")
+                log_f.flush()
+
+            history = active_learn_row(
+                robot,
+                processor,
+                optimizer,
+                row_letter,
+                target_color,
+                color_slots,
+                max_iterations=11,
+                log_cb=logger,
+            )
+            logger(f"Completed {row_letter} in {len(history)} steps")
+
+    finally:
         robot.add_turn_off_lights_action()
         robot.add_close_action()
         robot.execute_actions_on_remote()
-        print("Robot shut down.")
-    except Exception as e:
-        print(f"Error during OT-2 shutdown: {e}")
-
-    if log_f is not None:
         log_f.close()
+
+
+if __name__ == "__main__":
+    run_active_learning()

@@ -1,3 +1,5 @@
+"""Active learning optimizer used by the colour matching robot."""
+
 import numpy as np
 import random
 import math
@@ -136,33 +138,46 @@ class ColorLearningOptimizer:
             total_vol = sum(adjusted)
 
         scale = self.max_well_volume / total_vol
-        adjusted = [int(v * scale) for v in adjusted]
 
-        diff = self.max_well_volume - sum(adjusted)
-        if diff != 0:
-            max_idx = np.argmax(adjusted)
-            adjusted[max_idx] += diff
+        # convert scaled volumes to integer multiples of the step size
+        scaled = [v * scale for v in adjusted]
+        units = [int(round(val / self.step)) for val in scaled]
+        target_units = self.max_well_volume // self.step
+        diff_units = target_units - sum(units)
+        if diff_units != 0:
+            max_idx = np.argmax(units)
+            units[max_idx] += diff_units
+
+        adjusted = [u * self.step for u in units]
 
         return adjusted
 
     def _mlp_active_optimize(self, target_rgb: list) -> list:
+        """Suggest volumes by directly optimising the model prediction."""
         if len(self.X_train) < 2:
             return self._random_combination()
 
-        candidates = [self._random_combination() for _ in range(self.candidate_num)]
-        candidates_np = np.array(candidates)
+        from scipy.optimize import minimize
 
-        all_preds = np.array([model.predict(candidates_np) for model in self.models])
-        mean_preds = np.mean(all_preds, axis=0)
-        std_preds = np.std(all_preds, axis=0)
+        target = np.array(target_rgb)
 
-        mean_distances = np.linalg.norm(mean_preds - np.array(target_rgb), axis=1)
-        uncertainty_scores = np.linalg.norm(std_preds, axis=1)
+        def objective(vols: np.ndarray) -> float:
+            vols = np.clip(vols, 0, self.max_well_volume)
+            vols = self._apply_min_volume_constraint(vols.tolist())
+            x = np.array(vols).reshape(1, -1)
+            preds = np.array([m.predict(x)[0] for m in self.models])
+            mean_pred = np.mean(preds, axis=0)
+            std_pred = np.std(preds, axis=0)
+            dist = np.linalg.norm(mean_pred - target)
+            dist -= self.exploration_weight * np.linalg.norm(std_pred)
+            return dist
 
-        acquisition_scores = -mean_distances + self.exploration_weight * uncertainty_scores
+        x0 = np.array(self._random_combination(), dtype=float)
+        bounds = [(0, self.max_well_volume) for _ in range(self.dye_count)]
 
-        best_idx = np.argmax(acquisition_scores)
-        return candidates[best_idx]
+        result = minimize(objective, x0, method="L-BFGS-B", bounds=bounds, options={"maxiter": 100})
+        best_vols = result.x if result.success else x0
+        return self._apply_min_volume_constraint(best_vols.tolist())
 
     def _extratree_active_optimize(self, target_rgb: list) -> list:
         if len(self.X_train) == 0:

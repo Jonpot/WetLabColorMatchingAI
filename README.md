@@ -1,28 +1,33 @@
 # WetLabColorMatchingAI
 
-This repository contains experiments for mixing liquid dyes with an Opentrons OT-2 robot and a webcam.
-The goal is to automatically create recipes that reproduce a target color.
+WetLabColorMatchingAI automates color mixing experiments on an Opentrons OT-2 robot using a webcam for feedback. The project aims to learn dye recipes that reproduce arbitrary target colors.  A recent cleanup reorganized the repository so each component now lives in its own folder, which should make the workflow clearer for new contributors.
 
-## Key scripts
+## Repository structure
 
-- **app.py** – Streamlit interface that allows a user to compete against the OT‑2 in a color mixing challenge.
-- **main_active_learning.py** – Runs an active learning pipeline that autonomously chooses dye volumes, instructs the OT‑2, photographs the plate and logs results.
+- **app.py** – Streamlit interface for manually mixing colors and competing against the OT-2.
+- **main_active_learning.py** – Provides reusable functions to run the active learning loop and can still be executed as a script for a full plate run.
+- **active_learning/** – Optimizers and algorithms that decide which dye volumes to test next.
+- **camera/** – Camera calibration utilities and example data used to measure plate colors.
+- **robot/** – OT-2 helper functions and argument files shared by the different protocols.
+- **remote/** – Protocols intended to be executed directly on the OT-2.
+- **color_space_research/** – Notebooks and scripts for exploring color spaces and analyzing lighting conditions.
+- **utils/** – Local test scripts and helper tools.
+- **old_tests/** – Legacy experiments that are kept for reference.
+- **secret/** – SSH keys used to connect to the OT-2 (not included in the repo).
 
 ## Installation
 
-The scripts require Python 3. Install the main dependencies with:
+All scripts require Python 3. Install the main dependencies with:
 
 ```bash
 pip install paramiko scp opencv-python streamlit scikit-learn
 ```
 
-Additional packages such as `numpy`, `matplotlib` and others that ship with Python scientific stacks may also be required.
+Additional packages such as `numpy`, `matplotlib` and others that ship with scientific Python distributions may also be required.
 
-## Connecting to the OT‑2
+## Connecting to the OT-2
 
-Both the Streamlit app and the learning pipeline connect to the OT‑2 over SSH using `paramiko`.
-Edit the `hostname`, `username` and SSH key path in the scripts if your robot uses different settings.
-Make sure your workstation can reach the OT‑2 on the network and that the SSH key is stored in the `secret/` folder.
+Both the Streamlit app and the learning pipeline connect to the OT-2 over SSH using `paramiko`. Edit the hostname, username and SSH key path in the scripts if your robot uses different settings. Make sure your workstation can reach the robot on the network and that the SSH key is stored in the `secret/` folder.
 
 ## Usage
 
@@ -40,6 +45,7 @@ This launches the web UI where you can enter dye volumes and see the measured co
 python main_active_learning.py
 ```
 
-The script will iterate through plate rows, mixing and measuring until it matches each target color or the iteration limit is reached.
+The script iterates through plate rows, mixing and measuring until it matches each target color or the iteration limit is reached.
 
+Both ``active_learn_row`` and ``run_active_learning`` can also be imported from ``main_active_learning`` if you wish to integrate the optimisation loop into another application.
 
