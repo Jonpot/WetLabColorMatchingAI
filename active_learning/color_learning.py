@@ -136,12 +136,17 @@ class ColorLearningOptimizer:
             total_vol = sum(adjusted)
 
         scale = self.max_well_volume / total_vol
-        adjusted = [int(v * scale) for v in adjusted]
 
-        diff = self.max_well_volume - sum(adjusted)
-        if diff != 0:
-            max_idx = np.argmax(adjusted)
-            adjusted[max_idx] += diff
+        # convert scaled volumes to integer multiples of the step size
+        scaled = [v * scale for v in adjusted]
+        units = [int(round(val / self.step)) for val in scaled]
+        target_units = self.max_well_volume // self.step
+        diff_units = target_units - sum(units)
+        if diff_units != 0:
+            max_idx = np.argmax(units)
+            units[max_idx] += diff_units
+
+        adjusted = [u * self.step for u in units]
 
         return adjusted
 
