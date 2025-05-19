@@ -144,6 +144,64 @@ class PlateProcessor:
             out.append(rrow)
         return out
 
+    @staticmethod
+    def gaussian_cluster_rgb(img: np.ndarray, centers: np.ndarray,
+                             n: int = 80, sigma: float = 4.0,
+                             cluster_thresh: float = 10.0) -> list:
+        """Sample colours using a Gaussian distribution and return the
+        centroid of the largest cluster for each well.
+
+        Parameters
+        ----------
+        img : np.ndarray
+            BGR image from which to sample.
+        centers : np.ndarray
+            Array of well centre coordinates ``(rows × cols × 2)``.
+        n : int
+            Number of samples per well.
+        sigma : float
+            Standard deviation of the Gaussian in pixels.
+        cluster_thresh : float
+            Euclidean distance threshold for clustering.
+
+        Returns
+        -------
+        list
+            Nested Python lists (rows × cols × 3) of RGB values.
+        """
+        h, w = img.shape[:2]
+        out = []
+
+        def largest_cluster(points: np.ndarray) -> np.ndarray:
+            clusters: list[tuple[list[np.ndarray], np.ndarray]] = []
+            for p in points:
+                assigned = False
+                for cl in clusters:
+                    if np.linalg.norm(p - cl[1]) <= cluster_thresh:
+                        cl[0].append(p)
+                        cl[1][:] = np.mean(cl[0], axis=0)
+                        assigned = True
+                        break
+                if not assigned:
+                    clusters.append(([p], p.astype(float)))
+            if not clusters:
+                return np.array([0.0, 0.0, 0.0])
+            largest = max(clusters, key=lambda c: len(c[0]))
+            return largest[1]
+
+        for row in centers:
+            rrow = []
+            for cx, cy in row:
+                xs = np.random.normal(cx, sigma, n).round().astype(int)
+                ys = np.random.normal(cy, sigma, n).round().astype(int)
+                xs = np.clip(xs, 0, w - 1)
+                ys = np.clip(ys, 0, h - 1)
+                samples = img[ys, xs, ::-1].astype(np.float32)  # RGB
+                centroid = largest_cluster(samples)
+                rrow.append(centroid.tolist())
+            out.append(rrow)
+        return out
+
     # ───────────────────── root-polynomial colour correction ──────────────
     # 10-term basis: R, G, B, √RG, √RB, √GB, R², G², B², 1
     @staticmethod
@@ -355,7 +413,7 @@ class PlateProcessor:
         r = cfg["rectangle"]
         centres = self.well_centers(r["x1"], r["y1"], r["x2"], r["y2"],
                                     cfg["plate_type"])
-        raw = self.avg_rgb(img, centres)             # nested lists (rows × cols)
+        raw = self.gaussian_cluster_rgb(img, centres)  # nested lists (rows × cols)
 
         # 2) build RPCC from 24 patches
         dots = np.asarray(cfg["calibration_dots"], int)
