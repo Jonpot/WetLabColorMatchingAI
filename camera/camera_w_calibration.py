@@ -323,7 +323,7 @@ class PlateProcessor:
                 "calibration_dots": self.cpts}
 
     # -------------------------- main processing ---------------------------
-    def process_image(self, cam_index: int = 0,
+    def process_image(self, cam_index: int = 2,
                       snap: str = "camera/snapshot.jpg",
                       calib: str = "camera/calibration.json",
                       force_ui: bool = False,
@@ -414,7 +414,7 @@ class PlateProcessor:
 # ═══════════════════════════════════ CLI ══════════════════════════════════
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Capture calibration data and generate colour-correction matrix")
-    parser.add_argument("--cam-index", type=int, default=0, help="Camera index")
+    parser.add_argument("--cam-index", type=int, default=2, help="Camera index")
     parser.add_argument("--force-ui", action="store_true", help="Always show calibration UI")
     parser.add_argument("--plate-type", choices=["12", "24", "48", "96"], help="Plate type/well count")
     args = parser.parse_args()
