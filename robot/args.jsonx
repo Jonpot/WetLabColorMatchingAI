@@ -1,1 +1,0 @@
-{"is_updated": true, "actions": [{"add_color": {"color_slot": "7", "plate_well": "A12", "volume": 49}}, {"add_color": {"color_slot": "8", "plate_well": "A12", "volume": 119}}, {"add_color": {"color_slot": "11", "plate_well": "A12", "volume": 32}}, {"mix": {"plate_well": "A12", "volume": 200, "repetitions": 3}}], "reduced_tips_info": 4}

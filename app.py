@@ -27,7 +27,7 @@ MAX_GUESSES = MAX_WELLS_PER_ROW - 1  # 11
 MIN_VOL = 20
 MAX_VOL_SUM = 200
 CAM_INDEX = 2  # camera index for the plate processor
-VIRTUAL_MODE = True  # set to True for virtual mode
+VIRTUAL_MODE = False  # set to True for virtual mode
 
 
 # Example available color slots
