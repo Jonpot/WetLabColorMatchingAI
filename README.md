@@ -11,7 +11,8 @@ WetLabColorMatchingAI automates color mixing experiments on an Opentrons OT-2 ro
 - **active_learning/** – Optimizers and algorithms that decide which dye volumes
   to test next.
 - **camera/** – Camera calibration utilities and example data used to measure
-  plate colors.
+  plate colors.  The :class:`PlateProcessor` supports a ``virtual_mode`` that
+  skips the webcam and returns an all white plate for testing.
 - **robot/** – OT-2 helper functions and argument files shared by the different
   protocols.
 - **remote/** – Protocols intended to be executed directly on the OT-2.

@@ -5,7 +5,8 @@ camera_color24.py  ―  24-patch ColorChecker calibration pipeline
 ================================================================
 * UI shows 24 draggable dots -x drop them onto the chart.
 * Supports 12 / 24 / 48 / 96 well plates (5 x 5 trimmed-mean sampling).
-* Saves / loads rectangle, 24 dots, plate type, brightness, contrast.
+* Saves / loads rectangle, plate corners, 24 dots, plate type, brightness,
+  contrast.
 * Learns a 3 x 10 **root-polynomial colour-correction matrix** each run.
 * Generates a diagnostic image:
     ├ each well centre:   left-half = raw,    right-half = corrected
@@ -47,12 +48,16 @@ def lin2srgb(l: np.ndarray) -> np.ndarray:
 
 # ═════════════════════════════ PlateProcessor ═════════════════════════════
 class PlateProcessor:
-    """
+    """Camera plate processor.
+
     Handles camera snapshot, UI calibration, colour correction, and diagnostic
-    image generation.
+    image generation.  When ``virtual_mode`` is enabled no camera interaction
+    occurs and calls to :meth:`process_image` return an all white plate.  This
+    mirrors the ``OT2Manager``'s virtual mode for easier testing.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, virtual_mode: bool = False) -> None:
+        self.virtual_mode = virtual_mode
         # four plate corners and 24 colour-chart points
         self.pts:  list[tuple[int, int]] = []
         self.cpts: list[tuple[int, int]] = []
@@ -103,17 +108,46 @@ class PlateProcessor:
 
     @staticmethod
     def well_centers(x1: int, y1: int, x2: int, y2: int,
-                     plate: str = "96") -> np.ndarray:
-        """Return an (rows × cols × 2) array of centre coordinates."""
+                     plate: str = "96",
+                     quad: list[tuple[int, int]] | None = None) -> np.ndarray:
+        """Return an (rows × cols × 2) array of centre coordinates.
+
+        Parameters
+        ----------
+        x1, y1, x2, y2:
+            Bounding rectangle of the plate.  Retained for backward
+            compatibility.  Ignored if ``quad`` is provided.
+        plate:
+            Plate type ("12", "24", "48" or "96").
+        quad:
+            Optional list of four corner points (top-left, top-right,
+            bottom-right, bottom-left) defining a perspective transform.
+        """
+
         rows, cols = {"12": (8, 12), "24": (4, 6),
                       "48": (6, 8),  "96": (8, 12)}[plate]
-        dx, dy = (x2 - x1) / cols, (y2 - y1) / rows
-        grid = np.empty((rows, cols, 2), float)
-        for r in range(rows):
-            for c in range(cols):
-                grid[r, c] = (x1 + (c + 0.5) * dx,
-                              y1 + (r + 0.5) * dy)
-        return grid
+
+        if quad is None:
+            dx, dy = (x2 - x1) / cols, (y2 - y1) / rows
+            grid = np.empty((rows, cols, 2), float)
+            for r in range(rows):
+                for c in range(cols):
+                    grid[r, c] = (x1 + (c + 0.5) * dx,
+                                  y1 + (r + 0.5) * dy)
+            return grid
+
+        src = np.array([[0, 0], [cols, 0], [cols, rows], [0, rows]],
+                        np.float32)
+        dst = np.array(quad, np.float32)
+        H = cv2.getPerspectiveTransform(src, dst)
+
+        xs = np.linspace(0.5, cols - 0.5, cols)
+        ys = np.linspace(0.5, rows - 0.5, rows)
+        grid = np.stack(np.meshgrid(xs, ys), axis=-1).reshape(-1, 2)
+        homog = np.concatenate([grid, np.ones((grid.shape[0], 1))], axis=1)
+        warped = (H @ homog.T).T
+        warped = warped[:, :2] / warped[:, 2:3]
+        return warped.reshape(rows, cols, 2)
 
     # ─────────────────────── per-well trimmed-mean colour ─────────────────
     @staticmethod
@@ -200,7 +234,8 @@ class PlateProcessor:
 
             plate = self.plate_from_tb(cv2.getTrackbarPos("Plate", WIN))
             for cx, cy in self.well_centers(rx1, ry1, rx2, ry2,
-                                            plate).reshape(-1, 2):
+                                            plate,
+                                            quad=self.pts).reshape(-1, 2):
                 cv2.circle(disp, (int(cx), int(cy)), 4, (0, 0, 255), -1)
 
         # 3) 24 chart dots
@@ -265,8 +300,10 @@ class PlateProcessor:
         h, w = img.shape[:2]
         mW, mH = int(w * 0.1), int(h * 0.1)
 
-        # preset rectangle
-        if prev and "rectangle" in prev:
+        # preset plate corners
+        if prev and "corners" in prev:
+            self.pts = [tuple(map(int, p)) for p in prev["corners"]]
+        elif prev and "rectangle" in prev:
             r = prev["rectangle"]
             self.pts = [(r["x1"], r["y1"]),
                         (r["x2"], r["y1"]),
@@ -320,7 +357,8 @@ class PlateProcessor:
         
         return {"rectangle": rect,
                 "plate_type": plate,
-                "calibration_dots": self.cpts}
+                "calibration_dots": self.cpts,
+                "corners": self.pts}
 
     # -------------------------- main processing ---------------------------
     def process_image(self, cam_index: int = 2,
@@ -328,7 +366,30 @@ class PlateProcessor:
                       calib: str = "camera/calibration.json",
                       force_ui: bool = False,
                       plate_type: str | None = None):
-        """Main workflow: snapshot → calibration → corrected RGB matrix."""
+        """Capture and return the corrected plate colours.
+
+        In ``virtual_mode`` the camera is not accessed and a matrix of white
+        wells is returned instead.
+        """
+
+        if self.virtual_mode:
+            cfg = None
+            if os.path.exists(calib):
+                try:
+                    with open(calib) as f:
+                        cfg = json.load(f)
+                except json.JSONDecodeError:
+                    cfg = None
+
+            plate = plate_type or (cfg.get("plate_type") if cfg else "96")
+            rows, cols = {"12": (8, 12), "24": (4, 6),
+                          "48": (6, 8),  "96": (8, 12)}.get(str(plate), (8, 12))
+            corr = [[[255, 255, 255] for _ in range(cols)] for _ in range(rows)]
+            corrected_matrix_file = "camera/corrected_matrix.json"
+            with open(corrected_matrix_file, "w") as f:
+                json.dump(corr, f, indent=2)
+            return corr
+
         self.snapshot(cam_index, snap)
 
         cfg = None
@@ -354,7 +415,8 @@ class PlateProcessor:
         # 1) sample well colours
         r = cfg["rectangle"]
         centres = self.well_centers(r["x1"], r["y1"], r["x2"], r["y2"],
-                                    cfg["plate_type"])
+                                    cfg["plate_type"],
+                                    quad=cfg.get("corners"))
         raw = self.avg_rgb(img, centres)             # nested lists (rows × cols)
 
         # 2) build RPCC from 24 patches
