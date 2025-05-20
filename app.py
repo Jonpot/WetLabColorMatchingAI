@@ -5,6 +5,17 @@ from robot.ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
 from camera.camera_w_calibration import PlateProcessor
 import matplotlib.pyplot as plt
 import time
+from active_learning.color_learning import ColorLearningOptimizer
+from typing import Iterable
+import itertools
+
+
+def rerun() -> None:
+    """Trigger a Streamlit rerun regardless of version."""
+    if hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+    else:
+        st.rerun()
 
 # ——— CONFIG ———
 COLOR_THRESHOLD = 30
@@ -58,6 +69,96 @@ for row in ROWS:
     st.session_state.setdefault(f"guesses_{row}", 0)
     st.session_state.setdefault(f"history_{row}", [])  # list of (rgb, distance)
 
+# State for AI runs
+st.session_state.setdefault("ai_running", False)
+st.session_state.setdefault("ai_row", None)
+st.session_state.setdefault("ai_iter", 0)
+st.session_state.setdefault("ai_optimizer", None)
+st.session_state.setdefault("ai_used_combos", set())
+st.session_state.setdefault("ai_target", None)
+st.session_state.setdefault("ai_log", [])
+st.session_state.setdefault("ai_step_pending", False)
+
+
+def _ai_step() -> None:
+    """Execute one iteration of the active learning loop."""
+    row_letter: str = st.session_state.ai_row
+    optimizer: ColorLearningOptimizer = st.session_state.ai_optimizer
+    robot = st.session_state.robot
+    processor = st.session_state.processor
+    target_color: Iterable[int] = st.session_state.ai_target
+    iteration: int = st.session_state.ai_iter
+    used: set = st.session_state.ai_used_combos
+
+    column = iteration + 2
+    well_coordinate = f"{row_letter}{column}"
+    row_idx = ord(row_letter) - ord("A")
+
+    st.session_state.ai_log.append(
+        f"{row_letter} | Iter {iteration + 1} | Well {well_coordinate}"
+    )
+
+    while True:
+        vols = optimizer.suggest_next_experiment(list(target_color))
+        if tuple(vols) not in used:
+            used.add(tuple(vols))
+            break
+    st.session_state.ai_used_combos = used
+    st.session_state.ai_log.append(f"Suggested: {vols}")
+
+    while True:
+        try:
+            for i, volume in enumerate(vols):
+                if volume > 0:
+                    robot.add_add_color_action(
+                        color_slot=color_slots[i],
+                        plate_well=well_coordinate,
+                        volume=volume,
+                    )
+            robot.add_mix_action(
+                plate_well=well_coordinate,
+                volume=optimizer.max_well_volume / 2,
+                repetitions=3,
+            )
+            robot.execute_actions_on_remote()
+            break
+        except RuntimeError:
+            if robot.last_error_type == TiprackEmptyError:
+                st.session_state.ai_log.append("Tiprack empty - refreshing")
+                robot.add_refresh_tiprack_action()
+                robot.execute_actions_on_remote()
+            else:
+                raise
+
+    color_data = processor.process_image(cam_index=CAM_INDEX)
+    measured_color = color_data[row_idx][column - 1]
+    st.session_state.ai_log.append(f"Measured: {measured_color}")
+
+    optimizer.add_data(vols, measured_color)
+    distance = optimizer.calculate_distance(measured_color, target_color)
+    st.session_state.ai_log.append(f"Distance: {distance:.2f}")
+
+    hist = st.session_state[f"history_{row_letter}"]
+    hist.append((measured_color.tolist(), float(distance)))
+    st.session_state[f"guesses_{row_letter}"] += 1
+
+    if optimizer.within_tolerance(measured_color, target_color):
+        st.session_state.ai_log.append(f"Matched with {vols}")
+        st.session_state.ai_running = False
+    else:
+        st.session_state.ai_iter += 1
+        if st.session_state.ai_iter >= MAX_GUESSES:
+            st.session_state.ai_running = False
+
+
+if st.session_state.ai_running and st.session_state.ai_step_pending:
+    st.session_state.ai_step_pending = False
+    _ai_step()
+    if st.session_state.ai_running:
+        st.session_state.ai_step_pending = True
+        rerun()
+
+
 # ——— UI ———
 st.title("🎨 Human vs Robot: Color-Mixing Challenge")
 st.markdown(
@@ -68,7 +169,7 @@ st.markdown(
 """
 )
 
-row = st.selectbox("Select row", ROWS)
+row = st.selectbox("Select row", ROWS, disabled=st.session_state.ai_running)
 
 # ——— ROW SWITCH: re-read plate & prepopulate history ———
 if st.session_state.get("last_row") != row:
@@ -113,10 +214,11 @@ volumes = {}
 for i, slot in enumerate(color_slots):
     with cols[i]:
         volumes[slot] = st.number_input(
-            f"Slot {slot}", 
-            min_value=0.0, 
-            step=1.0, 
-            key=f"vol_{row}_{slot}"
+            f"Slot {slot}",
+            min_value=0.0,
+            step=1.0,
+            key=f"vol_{row}_{slot}",
+            disabled=st.session_state.ai_running
         )
 
 # Validation
@@ -133,8 +235,17 @@ if not guesses_left:
     st.info("You've used up all 11 guesses in this row.")
 
 can_make = ok_sizes and ok_sum and guesses_left
-make_btn = st.button("Make recipe", disabled=not can_make)
-close_btn = st.button("Close robot")
+make_btn = st.button(
+    "Make recipe",
+    disabled=(not can_make) or st.session_state.ai_running,
+)
+close_btn = st.button("Close robot", disabled=st.session_state.ai_running)
+deploy_btn = False
+if st.session_state[f"guesses_{row}"] == 0:
+    deploy_btn = st.button(
+        "Deploy AI",
+        disabled=st.session_state.ai_running,
+    )
 
 # ——— ACTION ———
 if make_btn:
@@ -167,6 +278,21 @@ if make_btn:
     hist = st.session_state[f"history_{row}"]
     hist.append((rgb.tolist(), dist))
     st.session_state[f"guesses_{row}"] += 1
+    rerun()
+
+if deploy_btn:
+    st.session_state.ai_running = True
+    st.session_state.ai_row = row
+    st.session_state.ai_iter = 0
+    st.session_state.ai_optimizer = ColorLearningOptimizer(
+        dye_count=len(color_slots),
+        tolerance=COLOR_THRESHOLD,
+    )
+    st.session_state.ai_used_combos = set()
+    st.session_state.ai_target = st.session_state[f"mystery_rgb_{row}"]
+    st.session_state.ai_log = []
+    st.session_state.ai_step_pending = True
+    rerun()
 
 if close_btn:
     try:
@@ -215,4 +341,8 @@ if st.session_state[f"history_{row}"]:
     ax.set_title(f"Distance vs. Guess for row {row}")
 
     st.pyplot(fig)
+
+if st.session_state.ai_log:
+    st.subheader("AI Log")
+    st.text("\n".join(str(x) for x in st.session_state.ai_log))
     
