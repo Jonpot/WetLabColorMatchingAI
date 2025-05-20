@@ -382,12 +382,11 @@ class PlateProcessor:
                     cfg = None
 
             plate = plate_type or (cfg.get("plate_type") if cfg else "96")
-            rows, cols = {"12": (8, 12), "24": (4, 6),
-                          "48": (6, 8),  "96": (8, 12)}.get(str(plate), (8, 12))
-            corr = [[[255, 255, 255] for _ in range(cols)] for _ in range(rows)]
+            rows, cols = {"12": (8, 12), "24": (4, 6), "48": (6, 8), "96": (8, 12)}.get(str(plate), (8, 12))
+            corr = np.full((rows, cols, 3), (255, 255, 255), dtype=np.float32)
             corrected_matrix_file = "camera/corrected_matrix.json"
             with open(corrected_matrix_file, "w") as f:
-                json.dump(corr, f, indent=2)
+                json.dump(corr.tolist(), f, indent=2)
             return corr
 
         self.snapshot(cam_index, snap)

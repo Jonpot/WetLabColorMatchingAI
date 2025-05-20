@@ -27,6 +27,8 @@ MAX_GUESSES = MAX_WELLS_PER_ROW - 1  # 11
 MIN_VOL = 20
 MAX_VOL_SUM = 200
 CAM_INDEX = 2  # camera index for the plate processor
+VIRTUAL_MODE = True  # set to True for virtual mode
+
 
 # Example available color slots
 color_slots = ["7", "8", "9"]
@@ -42,7 +44,7 @@ if "robot" not in st.session_state:
             key_filename="secret/ot2_ssh_key",
             password="lemos",
             reduced_tips_info=4,
-            virtual_mode=False,
+            virtual_mode=VIRTUAL_MODE,
             bypass_startup_key = True
         )
     else:
@@ -53,7 +55,8 @@ if "robot" not in st.session_state:
             key_filename="secret/ot2_ssh_key_remote",
             password=None,
             reduced_tips_info=4,
-            bypass_startup_key = True
+            bypass_startup_key = True,
+            virtual_mode=VIRTUAL_MODE
         )
 
     st.session_state.robot.add_turn_on_lights_action()
@@ -62,7 +65,7 @@ if "robot" not in st.session_state:
     print("Lights turned on.")
     time.sleep(2)  # wait for lights to stabilize
 
-    st.session_state.processor = PlateProcessor()
+    st.session_state.processor = PlateProcessor(virtual_mode=VIRTUAL_MODE)
 
 # track how many guesses we've made per row, and the measured RGBs+distances
 for row in ROWS:
@@ -183,14 +186,14 @@ if st.session_state.get("last_row") != row:
     full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX)
 
     # extract the mystery target
-    r_m, g_m, b_m = full_plate[ord(row) - ord("A"), MYSTERY_COL - 1]
+    r_m, g_m, b_m = full_plate[ord(row) - ord("A")][MYSTERY_COL - 1]
     myst_rgb = np.array([r_m, g_m, b_m])
     st.session_state[f"mystery_rgb_{row}"] = myst_rgb.tolist()
 
     # now scan existing guesses in cols 2→12
     prehist = []
     for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
-        rgb = full_plate[ord(row) - ord("A"), col]
+        rgb = full_plate[ord(row) - ord("A")][col]
         # white threshold:
         if any(ch < 180 for ch in rgb):
             dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
