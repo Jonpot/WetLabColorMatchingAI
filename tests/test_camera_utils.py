@@ -49,6 +49,13 @@ class CameraUtilsTests(unittest.TestCase):
         rgb = PlateProcessor.avg_rgb(img, centers, win=3, trim=0)
         self.assertTrue(np.allclose(rgb[0][0], [255, 0, 0]))
 
+    def test_gaussian_cluster_rgb_basic(self):
+        img = np.zeros((5, 5, 3), dtype=np.uint8)
+        img[:] = [0, 255, 0]
+        centers = np.array([[[2, 2]]], dtype=float)
+        rgb = PlateProcessor.gaussian_cluster_rgb(img, centers, n=20, sigma=0.5)
+        self.assertTrue(np.allclose(rgb[0][0], [0, 255, 0], atol=1))
+
 
 if __name__ == "__main__":
     unittest.main()
