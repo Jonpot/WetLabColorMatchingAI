@@ -48,12 +48,16 @@ def lin2srgb(l: np.ndarray) -> np.ndarray:
 
 # ═════════════════════════════ PlateProcessor ═════════════════════════════
 class PlateProcessor:
-    """
+    """Camera plate processor.
+
     Handles camera snapshot, UI calibration, colour correction, and diagnostic
-    image generation.
+    image generation.  When ``virtual_mode`` is enabled no camera interaction
+    occurs and calls to :meth:`process_image` return an all white plate.  This
+    mirrors the ``OT2Manager``'s virtual mode for easier testing.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, virtual_mode: bool = False) -> None:
+        self.virtual_mode = virtual_mode
         # four plate corners and 24 colour-chart points
         self.pts:  list[tuple[int, int]] = []
         self.cpts: list[tuple[int, int]] = []
@@ -362,7 +366,30 @@ class PlateProcessor:
                       calib: str = "camera/calibration.json",
                       force_ui: bool = False,
                       plate_type: str | None = None):
-        """Main workflow: snapshot → calibration → corrected RGB matrix."""
+        """Capture and return the corrected plate colours.
+
+        In ``virtual_mode`` the camera is not accessed and a matrix of white
+        wells is returned instead.
+        """
+
+        if self.virtual_mode:
+            cfg = None
+            if os.path.exists(calib):
+                try:
+                    with open(calib) as f:
+                        cfg = json.load(f)
+                except json.JSONDecodeError:
+                    cfg = None
+
+            plate = plate_type or (cfg.get("plate_type") if cfg else "96")
+            rows, cols = {"12": (8, 12), "24": (4, 6),
+                          "48": (6, 8),  "96": (8, 12)}.get(str(plate), (8, 12))
+            corr = [[[255, 255, 255] for _ in range(cols)] for _ in range(rows)]
+            corrected_matrix_file = "camera/corrected_matrix.json"
+            with open(corrected_matrix_file, "w") as f:
+                json.dump(corr, f, indent=2)
+            return corr
+
         self.snapshot(cam_index, snap)
 
         cfg = None
