@@ -90,12 +90,21 @@ class OT2Manager:
                 print(f"Error connecting to {self.hostname}: {e}")
                 sys.exit(1)
 
+            # Ensure the "robot" directory exists on the remote
+            try:
+                stdin, stdout, stderr = self.ssh.exec_command("mkdir -p /root/robot")
+                stdout.channel.recv_exit_status()  # Wait for command to finish
+            except Exception as e:
+                print(f"Error creating 'robot' directory on remote: {e}")
+
             # Initialize the args file and a flag to indicate when the remote process signals completion
             self._save_args_to_file("robot/args.jsonx")
             self._upload_file("robot/args.jsonx", "args.jsonx")
             # Ensure the latest protocol script is on the robot
             self._upload_file("remote/remote_ot2_color_learning_main.py",
                               "remote_ot2_color_learning_main.py")
+            # Upload ot2_utils.py to the robot directory on the remote
+            self._upload_file("robot/ot2_utils.py", "robot/ot2_utils.py")
             self._start_robot_listener()
             self._listen_for_completion()
         print("OT2Manager initialized and ready.")
