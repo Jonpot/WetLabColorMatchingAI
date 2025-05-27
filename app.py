@@ -1,4 +1,5 @@
 # app.py
+import json
 import streamlit as st
 import numpy as np
 from robot.ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
@@ -28,6 +29,7 @@ MIN_VOL = 20
 MAX_VOL_SUM = 200
 CAM_INDEX = 2  # camera index for the plate processor
 VIRTUAL_MODE = False  # set to True for virtual mode
+OT_NUMBER = 1
 
 
 # Example available color slots
@@ -35,27 +37,48 @@ color_slots = ["7", "8", "9"]
 
 FORCE_REMOTE = True  # set to True to force remote connection
 
+# ——— info.json ———
+try:
+    with open(f"secret/OT_{OT_NUMBER}/info.json", "r") as f:
+        info = st.session_state.get("info", {})
+        info.update(json.load(f))
+        st.session_state.info = info
+        local_ip = info.get("local_ip", "169.254.122.0")
+        local_password = info.get("local_password", "lemos")
+        local_password = None if local_password == "None" else local_password
+
+        remote_ip = info.get("remote_ip", "172.26.192.201")
+        remote_password = info.get("remote_password", "None")
+        remote_password = None if remote_password == "None" else remote_password
+except FileNotFoundError:
+    st.error("Configuration file not found. Please ensure `info.json` exists in the `secret/OT_1/` directory.")
+    st.stop()
+except json.JSONDecodeError:
+    st.error("Error decoding JSON in `info.json`. Please check the file format.")
+    st.stop()
+
+
 # ——— SESSION INIT ———
 if "robot" not in st.session_state:
     if not FORCE_REMOTE:
         st.session_state.robot = OT2Manager(
-            hostname="169.254.122.0",
+            hostname=local_ip,
             username="root",
-            key_filename="secret/ot2_ssh_key",
-            password="lemos",
+            key_filename=f"secret/OT_{OT_NUMBER}/ot2_ssh_key",
+            password=local_password,
             reduced_tips_info=4,
+            bypass_startup_key=True,
             virtual_mode=VIRTUAL_MODE,
-            bypass_startup_key = True
         )
     else:
         # fallback remote
         st.session_state.robot = OT2Manager(
-            hostname="172.26.192.201",
+            hostname=remote_ip,
             username="root",
-            key_filename="secret/ot2_ssh_key_remote",
-            password=None,
+            key_filename=f"secret/OT_{OT_NUMBER}/ot2_ssh_key_remote",
+            password=remote_password,
             reduced_tips_info=4,
-            bypass_startup_key = True,
+            bypass_startup_key=True,
             virtual_mode=VIRTUAL_MODE
         )
 
