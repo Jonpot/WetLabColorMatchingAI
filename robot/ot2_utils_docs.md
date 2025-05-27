@@ -44,6 +44,7 @@ OT2Manager(hostname: str, username: str, password: str, key_filename: str)
 - Establishes an SSH connection to the robot.
 - Initializes an empty action list stored in a JSON file (`args.jsonx`).
 - Uploads the initial `args.jsonx` file.
+- Uploads the latest `remote_ot2_color_learning_main.py` protocol script.
 - Starts an interactive shell session listener that sends the required initialization commands (sets `RUNNING_ON_PI=1` and runs the protocol script on the robot).
 
 ---
