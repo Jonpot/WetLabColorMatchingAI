@@ -93,6 +93,9 @@ class OT2Manager:
             # Initialize the args file and a flag to indicate when the remote process signals completion
             self._save_args_to_file("robot/args.jsonx")
             self._upload_file("robot/args.jsonx", "args.jsonx")
+            # Ensure the latest protocol script is on the robot
+            self._upload_file("remote/remote_ot2_color_learning_main.py",
+                              "remote_ot2_color_learning_main.py")
             self._start_robot_listener()
             self._listen_for_completion()
         print("OT2Manager initialized and ready.")
