@@ -29,13 +29,13 @@ MIN_VOL = 20
 MAX_VOL_SUM = 200
 CAM_INDEX = 2  # camera index for the plate processor
 VIRTUAL_MODE = False  # set to True for virtual mode
-OT_NUMBER = 1
+OT_NUMBER = 2
 
 
 # Example available color slots
 color_slots = ["7", "8", "9"]
 
-FORCE_REMOTE = True  # set to True to force remote connection
+FORCE_REMOTE = False  # set to True to force remote connection
 
 # ——— info.json ———
 try:
