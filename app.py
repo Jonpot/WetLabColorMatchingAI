@@ -18,7 +18,7 @@ def rerun() -> None:
         st.rerun()
 
 # ——— CONFIG ———
-COLOR_THRESHOLD = 30
+COLOR_THRESHOLD = 60
 ROWS = [chr(i) for i in range(ord("A"), ord("H")+1)]
 MAX_WELLS_PER_ROW = 12
 MYSTERY_COL = 1
