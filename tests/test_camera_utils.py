@@ -6,6 +6,10 @@ SKIP = importlib.util.find_spec("numpy") is None or importlib.util.find_spec("cv
 if not SKIP:
     import numpy as np
     import cv2
+    import os
+    import json
+    import tempfile
+    from unittest.mock import patch
     from camera.camera_w_calibration import PlateProcessor, srgb2lin, lin2srgb
 
 
@@ -55,6 +59,36 @@ class CameraUtilsTests(unittest.TestCase):
         centers = np.array([[[2, 2]]], dtype=float)
         rgb = PlateProcessor.gaussian_cluster_rgb(img, centers, n=20, sigma=0.5)
         self.assertTrue(np.allclose(rgb[0][0], [0, 255, 0], atol=1))
+
+    def test_baseline_saved_and_applied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = os.path.join(tmp, "snap.jpg")
+            calib = os.path.join(tmp, "cal.json")
+            img = np.zeros((10, 10, 3), dtype=np.uint8)
+            baseline = [[[1, 1, 1] for _ in range(12)] for _ in range(8)]
+            raw_vals = [[[11, 11, 11] for _ in range(12)] for _ in range(8)]
+
+            with open(snap, "wb") as f:
+                f.write(b"0")
+
+            with patch.object(PlateProcessor, "snapshot", return_value=snap), \
+                 patch("camera.camera_w_calibration.cv2.imread", return_value=img), \
+                 patch.object(PlateProcessor, "run_ui", return_value={
+                     "rectangle": {"x1": 0, "y1": 0, "x2": 1, "y2": 1},
+                     "plate_type": "96",
+                     "calibration_dots": [[0, 0]] * 24,
+                     "corners": [[0, 0], [1, 0], [1, 1], [0, 1]],
+                     "baseline_colors": baseline,
+                 }), \
+                 patch.object(PlateProcessor, "gaussian_cluster_rgb", return_value=raw_vals), \
+                 patch.object(PlateProcessor, "fit_rpcc", return_value=np.zeros((3, 10))), \
+                 patch.object(PlateProcessor, "apply_rpcc", side_effect=lambda arr, M: np.array(arr)):
+                corr = PlateProcessor().process_image(cam_index=0, snap=snap, calib=calib, force_ui=True)
+
+                self.assertTrue(np.allclose(corr[0][0], [10, 10, 10]))
+                with open(calib) as f:
+                    saved = json.load(f)
+                self.assertIn("baseline_colors", saved)
 
 
 if __name__ == "__main__":

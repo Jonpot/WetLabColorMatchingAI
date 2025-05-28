@@ -412,11 +412,18 @@ class PlateProcessor:
         rect={"x1":int(min(xs)),"y1":int(min(ys)),
               "x2":int(max(xs)),"y2":int(max(ys))}
         plate = self.plate_from_tb(plate_idx)
-        
-        return {"rectangle": rect,
-                "plate_type": plate,
-                "calibration_dots": self.cpts,
-                "corners": self.pts}
+
+        centers = self.well_centers(rect["x1"], rect["y1"], rect["x2"], rect["y2"],
+                                    plate, quad=self.pts)
+        baseline = self.gaussian_cluster_rgb(img, centers)
+
+        return {
+            "rectangle": rect,
+            "plate_type": plate,
+            "calibration_dots": self.cpts,
+            "corners": self.pts,
+            "baseline_colors": baseline,
+        }
 
     # -------------------------- main processing ---------------------------
     def process_image(self, cam_index: int = 2,
@@ -476,12 +483,18 @@ class PlateProcessor:
                                     quad=cfg.get("corners"))
         raw = self.gaussian_cluster_rgb(img, centers)  # nested lists (rows × cols)
 
+        baseline = cfg.get("baseline_colors")
+        if baseline is not None:
+            raw_bs = np.clip(np.array(raw, np.float32) - np.array(baseline, np.float32), 0, None)
+        else:
+            raw_bs = np.array(raw, np.float32)
+
         # 2) build RPCC from 24 patches
         dots = np.asarray(cfg["calibration_dots"], int)
         meas_raw = img[dots[:, 1], dots[:, 0], ::-1].astype(np.float32)  # N×3 RGB
         M10 = self.fit_rpcc(meas_raw, MACBETH_24_RGB)
         meas_corr = self.apply_rpcc(meas_raw, M10)
-        corr = self.apply_rpcc(np.array(raw, np.float32), M10)
+        corr = self.apply_rpcc(raw_bs, M10)
 
         # Save corrected matrix to a file
         corrected_matrix_file = "camera/corrected_matrix.json"
@@ -492,14 +505,14 @@ class PlateProcessor:
         # 3) build diagnostic image
         alpha = cfg.get("contrast", 10) / 10.0
         beta  = cfg.get("brightness", 100) - 100
-        raw_adj = np.clip(np.array(raw) * alpha + beta,
-                          0, 255).astype(np.uint8)
+        disp_raw = np.clip(np.array(raw) * alpha + beta,
+                           0, 255).astype(np.uint8)
 
         marked = img.copy()
         RADIUS = 10
 
         # (a) wells: half raw / half corrected
-        for ctr_row, raw_row, cor_row in zip(centers, raw_adj, corr):
+        for ctr_row, raw_row, cor_row in zip(centers, disp_raw, corr):
             for (cx, cy), rgb_r, rgb_c in zip(ctr_row, raw_row, cor_row):
                 cv2.circle(marked, (int(cx), int(cy)), RADIUS,
                            tuple(int(v) for v in rgb_c[::-1]), -1)
@@ -536,11 +549,58 @@ if __name__ == "__main__":
     parser.add_argument("--cam-index", type=int, default=2, help="Camera index")
     parser.add_argument("--force-ui", action="store_true", help="Always show calibration UI")
     parser.add_argument("--plate-type", choices=["12", "24", "48", "96"], help="Plate type/well count")
+    parser.add_argument("--robot-number", type=int,
+                        help="Load OT2 connection details from secret/OT_<num>/info.json")
     args = parser.parse_args()
 
-    corr = PlateProcessor().process_image(cam_index=args.cam_index,
-                                          force_ui=args.force_ui,
-                                          plate_type=args.plate_type)
+    robot = None
+    if args.robot_number is not None:
+        info_path = f"secret/OT_{args.robot_number}/info.json"
+        try:
+            with open(info_path) as f:
+                info = json.load(f)
+        except Exception as e:
+            raise SystemExit(f"Failed to read {info_path}: {e}")
+
+        local_ip = info.get("local_ip")
+        local_pw = info.get("local_password")
+        local_pw = None if local_pw in (None, "None") else local_pw
+        remote_ip = info.get("remote_ip")
+        remote_pw = info.get("remote_password")
+        remote_pw = None if remote_pw in (None, "None") else remote_pw
+        local_key = f"secret/OT_{args.robot_number}/ot2_ssh_key"
+        remote_key = f"secret/OT_{args.robot_number}/ot2_ssh_key_remote"
+
+        from robot.ot2_utils import OT2Manager
+        try:
+            robot = OT2Manager(hostname=local_ip,
+                               username="root",
+                               password=local_pw,
+                               key_filename=local_key,
+                               bypass_startup_key=True)
+            print("Connected to OT2 locally.")
+        except Exception as e:
+            print(f"Local connection failed: {e}. Trying remote...")
+            robot = OT2Manager(hostname=remote_ip,
+                               username="root",
+                               password=remote_pw,
+                               key_filename=remote_key,
+                               bypass_startup_key=True)
+            print("Connected to OT2 remotely.")
+
+        robot.add_turn_on_lights_action()
+        robot.execute_actions_on_remote()
+
+    corr = PlateProcessor().process_image(
+        cam_index=args.cam_index,
+        force_ui=args.force_ui,
+        plate_type=args.plate_type,
+    )
+
+    if robot:
+        robot.add_turn_off_lights_action()
+        robot.add_close_action()
+        robot.execute_actions_on_remote()
 
     # Example for remote OT-2 usage
     # from ot2_utils import OT2Manager
