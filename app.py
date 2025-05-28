@@ -306,11 +306,18 @@ if make_btn:
 
     robot = st.session_state.robot
     
+    total_vol = 0
     for slot, vol in volumes.items():
         if vol > 0:
             robot.add_add_color_action(color_slot=slot,
                                        plate_well=target_well,
                                        volume=int(vol))
+            total_vol += vol
+    robot.add_mix_action(
+        plate_well=target_well,
+        volume=total_vol/2,
+        repetitions=3
+    )
     try:
         robot.execute_actions_on_remote()
     except Exception as e:
