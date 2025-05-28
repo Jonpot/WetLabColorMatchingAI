@@ -18,6 +18,10 @@ from __future__ import annotations
 import cv2, time, json, os, argparse
 import numpy as np
 from pathlib import Path
+import sys 
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 
 WIN = "Calibration"            # OpenCV window name
 
