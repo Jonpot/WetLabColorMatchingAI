@@ -19,7 +19,7 @@ def rerun() -> None:
         st.rerun()
 
 # ——— CONFIG ———
-COLOR_THRESHOLD = 30
+COLOR_THRESHOLD = 60
 ROWS = [chr(i) for i in range(ord("A"), ord("H")+1)]
 MAX_WELLS_PER_ROW = 12
 MYSTERY_COL = 1
@@ -28,7 +28,9 @@ MAX_GUESSES = MAX_WELLS_PER_ROW - 1  # 11
 MIN_VOL = 20
 MAX_VOL_SUM = 200
 VIRTUAL_MODE = False  # set to True for virtual mode
+
 OT_NUMBER = 2
+
 
 
 # Example available color slots
@@ -51,6 +53,27 @@ try:
         remote_password = None if remote_password == "None" else remote_password
 
         CAM_INDEX = info.get("cam_index", 1)
+except FileNotFoundError:
+    st.error("Configuration file not found. Please ensure `info.json` exists in the `secret/OT_1/` directory.")
+    st.stop()
+except json.JSONDecodeError:
+    st.error("Error decoding JSON in `info.json`. Please check the file format.")
+    st.stop()
+
+
+# ——— info.json ———
+try:
+    with open(f"secret/OT_{OT_NUMBER}/info.json", "r") as f:
+        info = st.session_state.get("info", {})
+        info.update(json.load(f))
+        st.session_state.info = info
+        local_ip = info.get("local_ip", "169.254.122.0")
+        local_password = info.get("local_password", "lemos")
+        local_password = None if local_password == "None" else local_password
+
+        remote_ip = info.get("remote_ip", "172.26.192.201")
+        remote_password = info.get("remote_password", "None")
+        remote_password = None if remote_password == "None" else remote_password
 except FileNotFoundError:
     st.error("Configuration file not found. Please ensure `info.json` exists in the `secret/OT_1/` directory.")
     st.stop()
