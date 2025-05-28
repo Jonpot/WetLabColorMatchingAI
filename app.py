@@ -27,7 +27,6 @@ FIRST_GUESS_COL = 2
 MAX_GUESSES = MAX_WELLS_PER_ROW - 1  # 11
 MIN_VOL = 20
 MAX_VOL_SUM = 200
-CAM_INDEX = 2  # camera index for the plate processor
 VIRTUAL_MODE = False  # set to True for virtual mode
 OT_NUMBER = 2
 
@@ -50,6 +49,8 @@ try:
         remote_ip = info.get("remote_ip", "172.26.192.201")
         remote_password = info.get("remote_password", "None")
         remote_password = None if remote_password == "None" else remote_password
+
+        CAM_INDEX = info.get("cam_index", 1)
 except FileNotFoundError:
     st.error("Configuration file not found. Please ensure `info.json` exists in the `secret/OT_1/` directory.")
     st.stop()
