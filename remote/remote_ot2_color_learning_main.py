@@ -428,6 +428,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 else:
                     protocol.comment(f"{subaction_name} not found in defined commands.")
 
+        # Move the pipette to the trash to avoid covering the camera
+        if protocol.is_simulating():
+            protocol.comment("Simulating: moving pipette to trash.")
+        else:
+            protocol.comment("Moving pipette to trash.")
+            pipette.move_to(pipette.trash_container.top())
+
         # Set is_updated to False
         data["is_updated"] = False
         # Remove the actions key
