@@ -66,6 +66,8 @@ class CameraUtilsTests(unittest.TestCase):
             calib = os.path.join(tmp, "cal.json")
             img = np.zeros((10, 10, 3), dtype=np.uint8)
             baseline = [[[1, 1, 1] for _ in range(12)] for _ in range(8)]
+            baseline[0][0] = [2, 2, 2]
+            baseline[0][1] = [0, 0, 0]
             raw_vals = [[[11, 11, 11] for _ in range(12)] for _ in range(8)]
 
             with open(snap, "wb") as f:
