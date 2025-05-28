@@ -489,7 +489,13 @@ class PlateProcessor:
 
         baseline = cfg.get("baseline_colors")
         if baseline is not None:
-            raw_bs = np.clip(np.array(raw, np.float32) - np.array(baseline, np.float32), 0, None)
+            # Compute the per-well difference from the average baseline and
+            # subtract that from the raw reading.  This avoids clipping
+            # everything to blue when the baseline itself is quite bright.
+            baseline_arr = np.array(baseline, np.float32)
+            base_mean = baseline_arr.mean(axis=(0, 1), keepdims=True)
+            diff = baseline_arr - base_mean
+            raw_bs = np.clip(np.array(raw, np.float32) - diff, 0, None)
         else:
             raw_bs = np.array(raw, np.float32)
 
