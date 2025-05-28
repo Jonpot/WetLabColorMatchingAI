@@ -24,14 +24,11 @@ WetLabColorMatchingAI automates color mixing experiments on an Opentrons OT-2 ro
 
 ## Installation
 
-All scripts require Python 3. Install the main dependencies with:
+All scripts require Python 3. Install the required packages with:
 
 ```bash
-pip install paramiko scp opencv-python streamlit scikit-learn
+pip install -r requirements.txt
 ```
-
-Additional packages such as `numpy`, `matplotlib` and others that ship with
-scientific Python distributions may also be required.
 
 ## Connecting to the OT-2
 

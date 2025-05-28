@@ -4,7 +4,6 @@ import sys
 from typing import Any, Dict, List, Tuple
 from opentrons import protocol_api
 import time
-from robot.ot2_utils import get_plate_type
 
 color_slots = ['4','5','6','7','8','9','10','11']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -230,13 +229,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         pick_up_tip(color_slot)
         pipette.aspirate(volume, colors[color_slot])
-        pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
-        pipette.dispense(volume, plate.labware[plate_well].bottom(z=81))
+        pipette.touch_tip(plate.labware[plate_well], v_offset=15, radius=0) # necessary to avoid crashing against the large adapter
+        pipette.dispense(volume, plate.labware[plate_well].bottom(z=1))
 
         plate.wells[plate_well].volume += volume
 
         # Blowout the remaining liquid in the pipette
-        pipette.blow_out(plate.labware[plate_well].bottom(z=95))
+        pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
         return_tip(color_slot)
     
@@ -258,11 +257,11 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
         # Quick mix (has to be manual because the default mix function doesn't work with the large adapter)
         for _ in range(repititions):
-            pipette.aspirate(volume, plate.labware[plate_well].bottom(z=78))
-            pipette.dispense(volume, plate.labware[plate_well].bottom(z=78))
+            pipette.aspirate(volume, plate.labware[plate_well].bottom(z=1))
+            pipette.dispense(volume, plate.labware[plate_well].bottom(z=1))
 
         # Blowout the remaining liquid in the pipette
-        pipette.blow_out(plate.labware[plate_well].bottom(z=95))
+        pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
         return_tip("mix")
 
@@ -275,12 +274,12 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         """
         global tiprack_state
         pick_up_tip()
-        pipette.touch_tip(plate.labware['A1'], v_offset=95, radius=0)
-        pipette.move_to(plate.labware['A1'].bottom(z=81))
+        pipette.touch_tip(plate.labware['A1'], radius=0)
+        pipette.move_to(plate.labware['A1'].bottom())
         time.sleep(10)
         
-        pipette.touch_tip(plate.labware['H12'], v_offset=95, radius=0)
-        pipette.move_to(plate.labware['H12'].bottom(z=81))
+        pipette.touch_tip(plate.labware['H12'], radius=0)
+        pipette.move_to(plate.labware['H12'].bottom())
         time.sleep(10)
         return_tip()
 
@@ -309,7 +308,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     ### MAIN PROTOCOL ###
 
-    plate_type = get_plate_type()
+    plate_type = "corning_96_wellplate_360ul_flat"
     global tiprack_state, run_flag, reduced_tips_info
     reduced_tips_info = None
     protocol.comment("Loading labware and instruments...")
