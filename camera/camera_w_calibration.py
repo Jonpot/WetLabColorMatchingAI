@@ -601,16 +601,23 @@ if __name__ == "__main__":
         robot.add_turn_on_lights_action()
         robot.execute_actions_on_remote()
 
-    corr = PlateProcessor().process_image(
-        cam_index=args.cam_index,
-        force_ui=args.force_ui,
-        plate_type=args.plate_type,
-    )
+        corr = PlateProcessor().process_image(
+            cam_index=args.cam_index,
+            force_ui=args.force_ui,
+            plate_type=args.plate_type,
+            calib=f"secret/OT_{args.robot_number}/calibration.json"
+        )
 
-    if robot:
         robot.add_turn_off_lights_action()
         robot.add_close_action()
         robot.execute_actions_on_remote()
+    else:
+        corr = PlateProcessor().process_image(
+            cam_index=args.cam_index,
+            force_ui=args.force_ui,
+            plate_type=args.plate_type,
+        )
+        
 
     # Example for remote OT-2 usage
     # from ot2_utils import OT2Manager

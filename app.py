@@ -180,7 +180,8 @@ def _ai_step() -> None:
             else:
                 raise
 
-    color_data = processor.process_image(cam_index=CAM_INDEX)
+    color_data = processor.process_image(cam_index=CAM_INDEX,
+                                         calib=f"secret/OT_{OT_NUMBER}/calibration.json")
     measured_color = color_data[row_idx][column - 1]
     st.session_state.ai_log.append(f"Measured: {measured_color}")
 
@@ -230,7 +231,8 @@ if st.session_state.get("last_row") != row:
     st.session_state[f"history_{row}"] = []
 
     # snap the whole plate
-    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX)
+    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX,
+                                                          calib=f"secret/OT_{OT_NUMBER}/calibration.json")
 
     # extract the mystery target
     r_m, g_m, b_m = full_plate[ord(row) - ord("A")][MYSTERY_COL - 1]
@@ -316,7 +318,8 @@ if make_btn:
         st.stop()
 
     # photo & measure
-    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX)
+    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX,
+                                                          calib=f"secret/OT_{OT_NUMBER}/calibration.json")
     # for debug: plot the full plate and all colors
     #st.image(full_plate, caption="Full plate image", use_column_width=True)
     row_idx = ord(row) - ord("A")
