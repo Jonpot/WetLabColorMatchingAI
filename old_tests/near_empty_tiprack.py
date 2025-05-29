@@ -16,7 +16,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     """Defines the testing protocol."""
 
     def get_filename() -> str:
-        filename = "color_matching_tiprack.json'"
+        filename = "tiprack_state.jsonx'"
         # use Path.home() on Mac, Linux, and on the robot   
         output_file_destination_path = Path.home().joinpath(
             filename

@@ -41,7 +41,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             return self.wells[row][column]
 
     def get_filename() -> str:
-        filename = "color_matching_tiprack.jsonx"
+        filename = "tiprack_state.jsonx"
         # use Path.home() on Mac, Linux, and on the robot   
         output_file_destination_path = Path.home().joinpath(
             filename
@@ -74,7 +74,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         # Some tips may be missing, so we need to update the current state of the tip rack from
         # the file. This is necessary to avoid the robot trying to use tips that are not present.
 
-        # Check ./color_matching_tiprack.json exists, if not make it and assume full rack
+        # Check ./tiprack_state.jsonx exists, if not make it and assume full rack
         try:
             with open(get_filename(), 'r') as f:
                 tiprack_state = json.load(f)

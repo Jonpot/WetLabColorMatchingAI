@@ -9,9 +9,9 @@ color_slots = ['4','5','6','7','8','9','10','11']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 metadata = {
-    'protocolName': 'Color Matching Remote Protocol',
+    'protocolName': 'Battleship Remote OT-2 Protocol',
     'author': 'CMU Automated Lab',
-    'description': 'Control the OT-2 robot for color matching.',
+    'description': 'Control the OT-2 robot for the Battleship game.',
 }
 
 requirements = {'robotType': 'OT-2', 'apiLevel': '2.19'}
