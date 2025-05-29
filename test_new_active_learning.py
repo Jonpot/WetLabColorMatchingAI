@@ -6,13 +6,10 @@ external dependencies like ``paramiko``.
 """
 
 if __name__ == "__main__":
-    from pathlib import Path
-    import sys 
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from color_matching.robot.ot2_utils import OT2Manager, TiprackEmptyError
+    from robot.ot2_utils import OT2Manager, TiprackEmptyError
     from camera.camera_w_calibration import PlateProcessor
-    from color_matching.active_learning.color_learning import ColorLearningOptimizer
-    from color_matching.main_active_learning import active_learn_row
+    from active_learning.color_learning import ColorLearningOptimizer
+    from main_active_learning import active_learn_row
 
     color_slots = ["7", "8", "9", "11"]
 

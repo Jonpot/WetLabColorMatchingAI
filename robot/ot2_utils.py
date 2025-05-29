@@ -91,10 +91,10 @@ class OT2Manager:
                 sys.exit(1)
 
             # Initialize the args file and a flag to indicate when the remote process signals completion
-            self._save_args_to_file("color_matching/robot/args.jsonx")
-            self._upload_file("color_matching/robot/args.jsonx", "args.jsonx")
+            self._save_args_to_file("robot/args.jsonx")
+            self._upload_file("robot/args.jsonx", "args.jsonx")
             # Ensure the latest protocol script is on the robot
-            self._upload_file("color_matching/remote/remote_ot2_color_learning_main.py",
+            self._upload_file("remote/remote_ot2_color_learning_main.py",
                               "remote_ot2_color_learning_main.py")
             self._start_robot_listener()
             self._listen_for_completion()
@@ -224,7 +224,7 @@ class OT2Manager:
             print("Running in virtual mode. Actions not executed on remote.")
             return  # Skip execution in virtual mode
         filename = "args.jsonx"
-        filepath = f"color_matching/robot/{filename}"
+        filepath = f"robot/{filename}"
         self._save_args_to_file(filepath)
         self._upload_file(filepath, filename)
         try:

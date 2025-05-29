@@ -2,12 +2,7 @@
 import json
 import streamlit as st
 import numpy as np
-
-from pathlib import Path
-import sys 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from color_matching.robot.ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
+from robot.ot2_utils import OT2Manager, WellFullError, TiprackEmptyError
 from camera.camera_w_calibration import PlateProcessor
 import matplotlib.pyplot as plt
 import time

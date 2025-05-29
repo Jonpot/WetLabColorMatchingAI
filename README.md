@@ -42,7 +42,7 @@ robot on the network and that the SSH key is stored in the `secret/` folder.
 ### Streamlit interface
 
 ```bash
-streamlit run color_matching_app.py
+streamlit run app.py
 ```
 
 This launches the web UI where you can enter dye volumes and see the measured
