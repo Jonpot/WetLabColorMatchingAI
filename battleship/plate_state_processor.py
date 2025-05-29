@@ -36,7 +36,9 @@ class PlateStateProcessor:
         """
         i, j = well
 
-        if i < 0 or i >= len(self.plate_schema['rows']) or j < 0 or j >= len(self.plate_schema['columns']):
+        rows = int(self.plate_schema.get('rows', 0))
+        cols = int(self.plate_schema.get('columns', 0))
+        if i < 0 or i >= rows or j < 0 or j >= cols:
             raise ValueError(f"Invalid well coordinates: {well}")
 
         plate_state = self.process_plate()
