@@ -67,16 +67,20 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         #protocol.comment(f"output file path = {output_file_destination_path}")
         return output_file_destination_path
 
-    def setup(plate_type: str = "corning_96_wellplate_360ul_flat") -> tuple[dict[str, protocol_api.Labware],
-                                                                      Plate, protocol_api.InstrumentContext,
-                                                                      list[bool],
-                                                                      list[protocol_api.Labware]]:
+    def setup(plate_type: str = "corning_96_wellplate_360ul_flat",
+              plate_slot: str = "1",
+              ammo_slot: str = "2",
+              tiprack_slot: str = "3",
+              default_volume: int = 50) -> tuple[dict[str, protocol_api.Labware],
+                                                  Plate, protocol_api.InstrumentContext,
+                                                  list[bool],
+                                                  list[protocol_api.Labware]]:
         """
         Loads labware and instruments for the protocol.
 
         :param plate_type: The type of plate to use, as per the Opentrons API.
         """
-        tipracks: list[protocol_api.Labware] = [protocol.load_labware('opentrons_96_tiprack_300ul', location='3')]
+        tipracks: list[protocol_api.Labware] = [protocol.load_labware('opentrons_96_tiprack_300ul', location=tiprack_slot)]
 
         # Some tips may be missing, so we need to update the current state of the tip rack from
         # the file. This is necessary to avoid the robot trying to use tips that are not present.
@@ -93,12 +97,14 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             protocol.comment(f"(The file had the following contents: {f.read()})")
             tiprack_state = [True] * 96
 
-        colors: dict[str, protocol_api.Labware] = {}
-        for slot in color_slots:
-            colors[slot] = protocol.load_labware('nest_1_reservoir_290ml', location=str(slot))['A1']
+        ammo = protocol.load_labware('nest_1_reservoir_290ml', location=ammo_slot)['A1']
 
-        plate_labware = protocol.load_labware(plate_type, label="Dye Plate", location='1')
+        plate_labware = protocol.load_labware(plate_type, label="Battleship Plate", location=plate_slot)
         plate = Plate(plate_labware, len(plate_labware.rows()), len(plate_labware.columns()), plate_labware.wells()[0].max_volume)
+
+        for well in plate.wells.values():
+            # Initialize the well with its max volume
+            well.volume += default_volume
 
         pipette = protocol.load_instrument('p300_single_gen2', 'left', tip_racks=tipracks)
 
@@ -107,28 +113,28 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             # these tip boxes will be replaced as needed
             off_deck_tipracks.append(protocol.load_labware('opentrons_96_tiprack_300ul', location=protocol_api.OFF_DECK))
 
-        return colors, plate, pipette, tiprack_state, off_deck_tipracks
+        return ammo, plate, pipette, tiprack_state, off_deck_tipracks
 
-    def pick_up_tip(color_slot: str = None) -> None:
+    def pick_up_tip(tip_ID: str = None) -> None:
         """
         Picks up a tip from the tip rack.
         """
         global tiprack_state, reduced_tips_info
 
         if reduced_tips_info is not None:
-            if color_slot not in reduced_tips_info:
+            if tip_ID not in reduced_tips_info:
                 try:
                     color_slot_well = tiprack_state.index(True)
                 except ValueError:
-                    raise TiprackEmptyError(f"No tips left in the tip rack to assign for {color_slot}.")
-                reduced_tips_info[color_slot] = color_slot_well
-                protocol.comment(f"Using tip {color_slot_well} for color slot {color_slot}.")
+                    raise TiprackEmptyError(f"No tips left in the tip rack to assign for {tip_ID}.")
+                reduced_tips_info[tip_ID] = color_slot_well
+                protocol.comment(f"Using tip {color_slot_well} for color slot {tip_ID}.")
                 tiprack_state[color_slot_well] = False
 
             # At this point, this color slot has a dedicated tip assigned to it.
             # Pick up this tip
-            protocol.comment(f"Picking up tip {reduced_tips_info[color_slot]} for color slot {color_slot}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]]}")
-            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]])
+            protocol.comment(f"Picking up tip {reduced_tips_info[tip_ID]} for color slot {tip_ID}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID]]}")
+            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID]])
             return
             
 
@@ -210,14 +216,12 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.reset_tipracks()
         protocol.comment("Tip rack refreshed.")
 
-    def add_color(
-            color_slot: str | int,
+    def fire_missile(
             plate_well: str,
             volume: float) -> None:
         """
-        Adds a color to the plate at the specified well.
+        Fires a missile to the plate at the specified well.
 
-        :param color_slot: The slot of the color reservoir.
         :param plate_well: The well of the plate to add the color to.
         :param volume: The volume of the color to add.
 
@@ -227,8 +231,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
             raise WellFullError("Cannot add color to well; well is full.")
 
-        pick_up_tip(color_slot)
-        pipette.aspirate(volume, colors[color_slot])
+        pick_up_tip(tip_ID="missile")
+        pipette.aspirate(volume, ammo)
         pipette.touch_tip(plate.labware[plate_well], v_offset=15, radius=0) # necessary to avoid crashing against the large adapter
         pipette.dispense(volume, plate.labware[plate_well].bottom(z=1))
 
@@ -237,18 +241,20 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         # Blowout the remaining liquid in the pipette
         pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
-        return_tip(color_slot)
+        return_tip(color_slot="missile")
+
+        mix(plate_well, min(200,volume*2), 3)
     
     def mix(
             plate_well: str | int,
             volume: float,
-            repititions: int) -> None:
+            repetitions: int) -> None:
         """
         Mixes the contents of a well.
 
         :param plate_well: The well of the plate to mix.
         :param volume: The volume to mix.
-        :param repititions: The number of times to mix.
+        :param repetitions: The number of times to mix.
         """
         global tiprack_state, reduced_tips_info
 
@@ -256,7 +262,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
         # Quick mix (has to be manual because the default mix function doesn't work with the large adapter)
-        for _ in range(repititions):
+        for _ in range(repetitions):
             pipette.aspirate(volume, plate.labware[plate_well].bottom(z=1))
             pipette.dispense(volume, plate.labware[plate_well].bottom(z=1))
 
@@ -311,8 +317,6 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     plate_type = "corning_96_wellplate_360ul_flat"
     global tiprack_state, run_flag, reduced_tips_info
     reduced_tips_info = None
-    protocol.comment("Loading labware and instruments...")
-    colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type)
     # Wait for the json to change
 
     run_flag = True
@@ -338,6 +342,16 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         protocol.comment(f"(The file had the following contents: {f.read()})")
     except Exception as e:
         protocol.comment(f"Unexpected error: {e}. Assuming regular tip usage.")
+    
+    plate_slot = data.get("plate_slot", "1")
+    ammo_slot = data.get("ammo_slot", "2")
+    tiprack_slot = data.get("tiprack_slot", "3")
+    missile_volume = data.get("missile_volume", 50)
+    default_volume = data.get("default_volume", 50)
+    protocol.comment("Loading labware and instruments...")
+    ammo, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, plate_slot, ammo_slot, tiprack_slot, default_volume)
+    
+    
     protocol.comment("Ready")
     while run_flag:
         try:
@@ -411,15 +425,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     turn_off_lights()
                 elif subaction_name == "refresh_tiprack":
                     refresh_tiprack()
-                elif subaction_name == "add_color":
+                elif subaction_name == "fire_missile":
                     try:
-                        add_color(subaction_args["color_slot"], subaction_args["plate_well"], subaction_args["volume"])
+                        fire_missile(subaction_args["plate_well"], missile_volume)
                     except WellFullError as e:
                         return failed_to_run_actions(e)
                     except TiprackEmptyError as e:
                         return failed_to_run_actions(e)
-                elif subaction_name == "mix":
-                    mix(subaction_args["plate_well"], subaction_args["volume"], subaction_args["repetitions"])
                 elif subaction_name == "calibrate_96_well_plate":
                     calibrate_96_well_plate()
                 elif subaction_name == "close":

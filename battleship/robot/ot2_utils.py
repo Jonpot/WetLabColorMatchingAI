@@ -61,13 +61,15 @@ class OT2Manager:
                  plate_slot: str = '1',
                  ammo_slot: str = '2',
                  tiprack_slot: str = '3',
+                 missile_volume: int = 50,
+                 default_volume: int = 50,
                  virtual_mode: bool = False,
                  reduced_tips_info: None | int = None,
                  bypass_startup_key: bool = False) -> None:
         self.virtual_mode = virtual_mode
         self.last_error_type = None
         self.reduced_tips_info = reduced_tips_info
-        self.args = {"is_updated": False, "actions": [], "reduced_tips_info": self.reduced_tips_info, "plate_slot": plate_slot, "ammo_slot": ammo_slot, "tiprack_slot": tiprack_slot}
+        self.args = {"is_updated": False, "actions": [], "reduced_tips_info": self.reduced_tips_info, "plate_slot": plate_slot, "ammo_slot": ammo_slot, "tiprack_slot": tiprack_slot, "missile_volume": missile_volume, "default_volume": default_volume}
         self.finished_flag = False
         self.error_flag = False
         if not self.virtual_mode:
@@ -263,9 +265,9 @@ class OT2Manager:
         """Queue a refresh tip rack action."""
         self._add_action("refresh_tiprack")
 
-    def add_fire_missile_action(self, ammo_slot: str, plate_well: str) -> None:
+    def add_fire_missile_action(self, plate_well: str) -> None:
         """Queue a fire missile action."""
-        self._add_action("fire_missile", {"ammo_slot": ammo_slot, "plate_well": plate_well})
+        self._add_action("fire_missile", {"plate_well": plate_well})
 
     def __del__(self) -> None:
         # Close the SSH connection when the object is deleted.

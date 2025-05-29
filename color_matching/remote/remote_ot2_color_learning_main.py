@@ -109,26 +109,26 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         return colors, plate, pipette, tiprack_state, off_deck_tipracks
 
-    def pick_up_tip(color_slot: str = None) -> None:
+    def pick_up_tip(tip_ID: str = None) -> None:
         """
         Picks up a tip from the tip rack.
         """
         global tiprack_state, reduced_tips_info
 
         if reduced_tips_info is not None:
-            if color_slot not in reduced_tips_info:
+            if tip_ID not in reduced_tips_info:
                 try:
                     color_slot_well = tiprack_state.index(True)
                 except ValueError:
-                    raise TiprackEmptyError(f"No tips left in the tip rack to assign for {color_slot}.")
-                reduced_tips_info[color_slot] = color_slot_well
-                protocol.comment(f"Using tip {color_slot_well} for color slot {color_slot}.")
+                    raise TiprackEmptyError(f"No tips left in the tip rack to assign for {tip_ID}.")
+                reduced_tips_info[tip_ID] = color_slot_well
+                protocol.comment(f"Using tip {color_slot_well} for color slot {tip_ID}.")
                 tiprack_state[color_slot_well] = False
 
             # At this point, this color slot has a dedicated tip assigned to it.
             # Pick up this tip
-            protocol.comment(f"Picking up tip {reduced_tips_info[color_slot]} for color slot {color_slot}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]]}")
-            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]])
+            protocol.comment(f"Picking up tip {reduced_tips_info[tip_ID]} for color slot {tip_ID}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID]]}")
+            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID]])
             return
             
 
@@ -242,13 +242,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     def mix(
             plate_well: str | int,
             volume: float,
-            repititions: int) -> None:
+            repetitions: int) -> None:
         """
         Mixes the contents of a well.
 
         :param plate_well: The well of the plate to mix.
         :param volume: The volume to mix.
-        :param repititions: The number of times to mix.
+        :param repetitions: The number of times to mix.
         """
         global tiprack_state, reduced_tips_info
 
@@ -256,7 +256,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
         # Quick mix (has to be manual because the default mix function doesn't work with the large adapter)
-        for _ in range(repititions):
+        for _ in range(repetitions):
             pipette.aspirate(volume, plate.labware[plate_well].bottom(z=1))
             pipette.dispense(volume, plate.labware[plate_well].bottom(z=1))
 
