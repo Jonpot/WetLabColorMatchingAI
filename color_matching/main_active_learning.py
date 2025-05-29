@@ -1,21 +1,23 @@
-"""Utility functions for running the colour learning pipeline.
+"""Utility functions for running the color learning pipeline.
 
 This module exposes ``run_active_learning`` which can be imported by
 external applications.  When executed directly it behaves like the old
-script and performs colour matching over a set of rows.
+script and performs color matching over a set of rows.
 """
 
 from __future__ import annotations
 
 import time
 from pathlib import Path
+import sys 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from typing import Iterable, List, Callable
 
 import numpy as np
 from sklearn.metrics import mean_squared_error, r2_score
 
-from robot.ot2_utils import OT2Manager, TiprackEmptyError
-from active_learning.color_learning import ColorLearningOptimizer
+from color_matching.robot.ot2_utils import OT2Manager, TiprackEmptyError
+from color_matching.active_learning.color_learning import ColorLearningOptimizer
 from camera.camera_w_calibration import PlateProcessor
 
 

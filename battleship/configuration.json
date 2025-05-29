@@ -1,0 +1,28 @@
+{
+    "plate_schema": {
+        "rows": 8,
+        "columns": 12
+    },
+    "ship_schema": {
+        "carrier": {
+            "length": 5,
+            "count": 1
+        },
+        "battleship": {
+            "length": 4,
+            "count": 1
+        },
+        "cruiser": {
+            "length": 3,
+            "count": 1
+        },
+        "submarine": {
+            "length": 3,
+            "count": 1
+        },
+        "destroyer": {
+            "length": 2,
+            "count": 2
+        }
+    }
+}
