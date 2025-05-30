@@ -244,7 +244,7 @@ if st.session_state.get("last_row") != row:
     for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
         rgb = full_plate[ord(row) - ord("A")][col]
         # white threshold:
-        if any(ch < 150 for ch in rgb):
+        if any(ch < 130 for ch in rgb):
             dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
             prehist.append((rgb.tolist(), dist))
 
