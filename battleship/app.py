@@ -29,7 +29,7 @@ def save_config(cfg: Dict[str, Any]) -> None:
         json.dump(cfg, f, indent=4)
 
 
-OT_NUMBER = 1
+OT_NUMBER = 2
 VIRTUAL_MODE = True
 FORCE_REMOTE = False
 

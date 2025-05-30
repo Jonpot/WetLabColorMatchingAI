@@ -97,7 +97,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             protocol.comment(f"(The file had the following contents: {f.read()})")
             tiprack_state = [True] * 96
 
-        ammo = protocol.load_labware('nest_1_reservoir_290ml', location=ammo_slot)['A1']
+        ammo = protocol.load_labware('nest_12_reservoir_15ml', location=ammo_slot)['A1']
 
         plate_labware = protocol.load_labware(plate_type, label="Battleship Plate", location=plate_slot)
         plate = Plate(plate_labware, len(plate_labware.rows()), len(plate_labware.columns()), plate_labware.wells()[0].max_volume)
