@@ -31,7 +31,7 @@ class AI:
         if not isinstance(num_rows, int) or not isinstance(num_columns, int):
             raise ValueError("Plate schema must contain 'rows' and 'columns' as integers.")
 
-        self.board_state: np.ndarray = np.zeros((num_rows, num_columns), dtype=WellState)
+        self.board_state: np.ndarray = np.full((num_rows, num_columns), WellState.UNKNOWN, dtype=WellState)
         self.board_history: List[np.ndarray] = []
         self.board_history.append(self.board_state.copy())
 
@@ -203,7 +203,7 @@ class AI:
         self.robot.add_fire_missile_action(well_name)
         self.robot.execute_actions_on_remote()
 
-        well_state = self.plate_processor.determine_well_state(targeted_well[0], targeted_well[1])
+        well_state = self.plate_processor.determine_well_state((targeted_well[0], targeted_well[1]))
         self.board_state[targeted_well[0], targeted_well[1]] = well_state
 
     def determine_game_state(self) -> bool:
