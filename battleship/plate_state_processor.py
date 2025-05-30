@@ -21,10 +21,10 @@ class PlateStateProcessor:
     Primary functionality is to determine the state of a well in a plate
     as a HIT or MISS based on the color detected in the well's position.
     """
-    def __init__(self, plate_schema: Dict[str, Any], cam_index: int = 2) -> None:
+    def __init__(self, plate_schema: Dict[str, Any], cam_index: int = 2, virtual_mode: bool = False) -> None:
         """Initialize the PlateStateProcessor with a camera index."""
         self.cam_index = cam_index
-        self.processor = PlateProcessor()
+        self.processor = PlateProcessor(virtual_mode=virtual_mode)
         self.plate_schema = plate_schema
 
     def determine_well_state(self, well: Tuple[int, int]) -> WellState:
@@ -44,9 +44,9 @@ class PlateStateProcessor:
         plate_state = self.process_plate()
 
         well_color = plate_state[i][j]
-        if well_color == WellColor.RED:
+        if well_color == WellColor.CLEAR:
             return WellState.HIT
-        elif well_color == WellColor.CLEAR:
+        elif well_color == WellColor.RED:
             return WellState.MISS
         else:
             raise ValueError(f"Unknown well color: {well_color} at coordinates {well}")

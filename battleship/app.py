@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import sys 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from string import ascii_uppercase
 from typing import Any, Dict, Tuple
 
@@ -28,7 +30,7 @@ def save_config(cfg: Dict[str, Any]) -> None:
 
 
 OT_NUMBER = 1
-VIRTUAL_MODE = False
+VIRTUAL_MODE = True
 FORCE_REMOTE = False
 
 # ---- info.json ----
@@ -61,7 +63,8 @@ def plot_board(board: np.ndarray) -> plt.Figure:
         WellState.HIT: "#e06666",
     }
     rows, cols = board.shape
-    data = np.vectorize(lambda x: {s: i for i, s in enumerate(cmap)}[x])(board)
+    mapping = {state.value: idx for idx, state in enumerate(cmap)}
+    data = np.vectorize(lambda x: mapping[x.value])(board).astype(int)
     fig, ax = plt.subplots()
     ax.imshow(data, cmap=plt.matplotlib.colors.ListedColormap(list(cmap.values())), vmin=0, vmax=2)
     ax.set_xticks(range(cols))
@@ -98,7 +101,7 @@ if "robot" not in st.session_state:
         )
     st.session_state.robot.add_turn_on_lights_action()
     st.session_state.robot.execute_actions_on_remote()
-    st.session_state.processor = PlateStateProcessor(config.get("plate_schema", {}), cam_index=CAM_INDEX)
+    st.session_state.processor = PlateStateProcessor(config.get("plate_schema", {}), cam_index=CAM_INDEX, virtual_mode=VIRTUAL_MODE)
 
 st.title("Battleship Robot")
 
@@ -146,7 +149,8 @@ def run_ai(cfg: Dict[str, Any], processor: PlateStateProcessor, robot: OT2Manage
             break
         try:
             move = ai.get_next_move()
-        except RuntimeError:
+        except RuntimeError as e:
+            print(f"Error determining next move: {e}")
             break
         ai.fire_missile(move)
         ai.board_history.append(ai.board_state.copy())
