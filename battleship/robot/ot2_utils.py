@@ -61,10 +61,10 @@ class OT2Manager:
                  plate_slot: str = '1',
                  ammo_slot: str = '2',
                  tiprack_slot: str = '3',
-                 missile_volume: int = 50,
+                 missile_volume: int = 100,
                  default_volume: int = 50,
                  virtual_mode: bool = False,
-                 reduced_tips_info: None | int = None,
+                 reduced_tips_info: None | int = 2,
                  bypass_startup_key: bool = False) -> None:
         self.virtual_mode = virtual_mode
         self.last_error_type = None

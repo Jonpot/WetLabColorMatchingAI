@@ -4,9 +4,21 @@
         "columns": 12
     },
     "ship_schema": {
-        "cruiser": {
+        "carrier": {
+            "length": 5,
+            "count": 1
+        },
+        "battleship": {
+            "length": 4,
+            "count": 1
+        },
+        "submarine": {
             "length": 3,
             "count": 1
+        },
+        "destroyer": {
+            "length": 2,
+            "count": 2
         }
     }
 }

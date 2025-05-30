@@ -316,7 +316,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     plate_type = "corning_96_wellplate_360ul_flat"
     global tiprack_state, run_flag, reduced_tips_info
-    reduced_tips_info = None
+    reduced_tips_info = {}
     # Wait for the json to change
 
     run_flag = True

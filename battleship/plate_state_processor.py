@@ -66,7 +66,7 @@ class PlateStateProcessor:
         significantly higher than the other two color channels.
         """
         r, g, b = color
-        if r > g + 30 and r > b + 30:
+        if r > g + 20 and r > b + 20:
             return WellColor.RED
         else:
             return WellColor.CLEAR
