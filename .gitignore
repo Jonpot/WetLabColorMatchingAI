@@ -10,3 +10,4 @@ camera/corrected_matrix.json
 camera/output_with_centers_corr.jpg
 camera/snapshot.jpg
 robot/args.jsonx
+battleship/robot/args.jsonx
