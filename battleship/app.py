@@ -29,8 +29,8 @@ def save_config(cfg: Dict[str, Any]) -> None:
         json.dump(cfg, f, indent=4)
 
 
-OT_NUMBER = 1
-VIRTUAL_MODE = True
+OT_NUMBER = 2
+VIRTUAL_MODE = False
 FORCE_REMOTE = False
 
 # ---- info.json ----
@@ -89,6 +89,7 @@ if "robot" not in st.session_state:
             password=local_password,
             bypass_startup_key=True,
             virtual_mode=VIRTUAL_MODE,
+            reduced_tips_info=2
         )
     else:
         st.session_state.robot = OT2Manager(
@@ -98,10 +99,11 @@ if "robot" not in st.session_state:
             password=remote_password,
             bypass_startup_key=True,
             virtual_mode=VIRTUAL_MODE,
+            reduced_tips_info=2
         )
     st.session_state.robot.add_turn_on_lights_action()
     st.session_state.robot.execute_actions_on_remote()
-    st.session_state.processor = PlateStateProcessor(config.get("plate_schema", {}), cam_index=CAM_INDEX, virtual_mode=VIRTUAL_MODE)
+    st.session_state.processor = PlateStateProcessor(config.get("plate_schema", {}), ot_number=OT_NUMBER, cam_index=CAM_INDEX, virtual_mode=VIRTUAL_MODE)
 
 st.title("Battleship Robot")
 

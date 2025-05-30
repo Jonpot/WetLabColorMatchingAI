@@ -21,11 +21,12 @@ class PlateStateProcessor:
     Primary functionality is to determine the state of a well in a plate
     as a HIT or MISS based on the color detected in the well's position.
     """
-    def __init__(self, plate_schema: Dict[str, Any], cam_index: int = 2, virtual_mode: bool = False) -> None:
+    def __init__(self, plate_schema: Dict[str, Any], ot_number: int = 2, cam_index: int = 2, virtual_mode: bool = False) -> None:
         """Initialize the PlateStateProcessor with a camera index."""
         self.cam_index = cam_index
         self.processor = PlateProcessor(virtual_mode=virtual_mode)
         self.plate_schema = plate_schema
+        self.ot_number = ot_number
 
     def determine_well_state(self, well: Tuple[int, int]) -> WellState:
         """Determine the state of a well based on its coordinates.
@@ -53,7 +54,7 @@ class PlateStateProcessor:
 
     def process_plate(self) -> np.ndarray[WellColor]:
         """Process the plate image and return the measured plate as a WellColor array."""
-        raw_plate = self.processor.process_image(cam_index=self.cam_index)
+        raw_plate = self.processor.process_image(cam_index=self.cam_index, calib=f"secret/OT_{self.ot_number}/calibration.json")
         return np.array([[self.determine_color(color) for color in row] for row in raw_plate])
 
     def determine_color(self, color: Tuple[int, int, int]) -> WellColor:
