@@ -19,7 +19,7 @@ class ColorLearningOptimizer:
                  optimization_mode: str = "mlp_active",
                  n_models: int = 5,
                  exploration_weight: float = 1.0,
-                 initial_explore_count: int = 0,
+                 initial_explore_count: int = 3,
                  initial_force_all_dyes: bool = False,
                  candidate_num: int = 300,
                  single_row_learning: bool = True,):
@@ -68,8 +68,8 @@ class ColorLearningOptimizer:
                 model.fit(self.X_train, self.Y_train)
 
     def suggest_next_experiment(self, target_color: list) -> list:
-        if self.initial_force_all_dyes and self.initial_explore_count < 2:
-            self.initial_explore_count += 1
+        if self.initial_force_all_dyes and self.initial_explore_count > 0:
+            self.initial_explore_count -= 1
             return self._forced_full_dye_combination()
         if self.optimization_mode == "mlp_active":
             volumes = self._mlp_active_optimize(target_color)
