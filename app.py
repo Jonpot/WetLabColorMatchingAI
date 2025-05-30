@@ -29,7 +29,7 @@ MIN_VOL = 20
 MAX_VOL_SUM = 200
 VIRTUAL_MODE = False  # set to True for virtual mode
 
-OT_NUMBER = 4
+OT_NUMBER = 2
 
 
 
@@ -244,7 +244,7 @@ if st.session_state.get("last_row") != row:
     for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
         rgb = full_plate[ord(row) - ord("A")][col]
         # white threshold:
-        if any(ch < 180 for ch in rgb):
+        if any(ch < 150 for ch in rgb):
             dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
             prehist.append((rgb.tolist(), dist))
 
@@ -381,7 +381,7 @@ if st.session_state[f"history_{row}"]:
 
     # last distance & threshold
     last_dist = row_hist[-1][1]
-    color = "#d4f8d4" if last_dist < COLOR_THRESHOLD else "#f87474"
+    color = "#d4d4d4" if last_dist < COLOR_THRESHOLD else "#f87474"
     st.markdown(
         f'<div style="padding:8px;background-color:{color};'
         f'border-radius:4px">Distance from target: {last_dist:.1f}</div>',

@@ -551,7 +551,8 @@ class PlateProcessor:
 
         cv2.imwrite("camera/output_with_centers_corr.jpg", marked)
         print("[Saved] camera/output_with_centers_corr.jpg")
-        return corr
+        #return corr
+        return disp_raw
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════
 if __name__ == "__main__":
