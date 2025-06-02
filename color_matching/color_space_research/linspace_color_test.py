@@ -1,9 +1,33 @@
-from robot.ot2_utils import OT2Manager
+from pathlib import Path
+import sys 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+from color_matching.robot.ot2_utils import OT2Manager
 import numpy as np
 import random
 import pandas as pd
 from camera.camera_w_calibration import PlateProcessor
-CAM_INDEX = 2  # camera index for the plate processor
+import json
+import time
+
+FORCE_REMOTE = False
+VIRTUAL_MODE = False 
+OT_NUMBER = 2
+
+# ——— info.json ———
+with open(f"secret/OT_{OT_NUMBER}/info.json", "r") as f:
+    info = {}
+    info.update(json.load(f))
+    local_ip = info.get("local_ip", "169.254.122.0")
+    local_password = info.get("local_password", "lemos")
+    local_password = None if local_password == "None" else local_password
+
+    remote_ip = info.get("remote_ip", "172.26.192.201")
+    remote_password = info.get("remote_password", "None")
+    remote_password = None if remote_password == "None" else remote_password
+
+    CAM_INDEX = info.get("cam_index", 1)
+
 
 # Define plate rows and columns
 plate_rows_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
@@ -13,16 +37,35 @@ plate_col_letters = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "1
 color_slots = {"red": "7", "yellow": "8", "green": "9", "water": "11"}
 
 # Instantiate OT2Manager and PlateProcessor
-try:
-    robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None, reduced_tips_info=len(color_slots), virtual_mode=True)
-except Exception as e:
-    print(f"Error initializing OT2Manager: {e}")
-    robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None, reduced_tips_info=len(color_slots))
+if not FORCE_REMOTE:
+    robot = OT2Manager(
+        hostname=local_ip,
+        username="root",
+        key_filename=f"secret/OT_{OT_NUMBER}/ot2_ssh_key",
+        password=local_password,
+        reduced_tips_info=4,
+        bypass_startup_key=True,
+        virtual_mode=VIRTUAL_MODE,
+    )
+else:
+    # fallback remote
+    robot = OT2Manager(
+        hostname=remote_ip,
+        username="root",
+        key_filename=f"secret/OT_{OT_NUMBER}/ot2_ssh_key_remote",
+        password=remote_password,
+        reduced_tips_info=4,
+        bypass_startup_key=True,
+        virtual_mode=VIRTUAL_MODE
+    )
 
-processor = PlateProcessor()
-
-# Turn on lights
 robot.add_turn_on_lights_action()
+robot.execute_actions_on_remote()
+
+print("Lights turned on.")
+time.sleep(2)  # wait for lights to stabilize
+
+processor = PlateProcessor(virtual_mode=VIRTUAL_MODE)
 
 # Create a 96 well plate
 def create_linspace_recipe(start: int, end: int, num: int, color: str, total_volume: int = 200) -> list[dict[str, int]]:

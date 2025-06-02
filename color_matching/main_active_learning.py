@@ -13,9 +13,11 @@ from typing import Iterable, List, Callable
 
 import numpy as np
 from sklearn.metrics import mean_squared_error, r2_score
-
-from robot.ot2_utils import OT2Manager, TiprackEmptyError
-from active_learning.color_learning import ColorLearningOptimizer
+from pathlib import Path
+import sys 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from color_matching.robot.ot2_utils import OT2Manager, TiprackEmptyError
+from color_matching.active_learning.color_learning import ColorLearningOptimizer
 from camera.camera_w_calibration import PlateProcessor
 
 
