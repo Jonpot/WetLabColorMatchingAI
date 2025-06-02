@@ -588,7 +588,7 @@ if __name__ == "__main__":
         local_key = f"secret/OT_{args.robot_number}/ot2_ssh_key"
         remote_key = f"secret/OT_{args.robot_number}/ot2_ssh_key_remote"
 
-        from robot.ot2_utils import OT2Manager
+        from color_matching.robot.ot2_utils import OT2Manager
         try:
             robot = OT2Manager(hostname=local_ip,
                                username="root",
