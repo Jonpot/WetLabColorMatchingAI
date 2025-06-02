@@ -1,0 +1,12 @@
+{
+    "plate_schema": {
+        "rows": 8,
+        "columns": 12
+    },
+    "ship_schema": {
+        "cruiser": {
+            "length": 3,
+            "count": 1
+        }
+    }
+}
