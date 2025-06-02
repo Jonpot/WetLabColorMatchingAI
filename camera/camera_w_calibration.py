@@ -506,6 +506,12 @@ class PlateProcessor:
         meas_corr = self.apply_rpcc(meas_raw, M10)
         corr = self.apply_rpcc(raw_bs, M10)
 
+        # Save raw matrix to a file
+        raw_matrix_file = "camera/raw_matrix.json"
+        with open(raw_matrix_file, "w") as f:
+            json.dump(raw_bs.tolist(), f, indent=2)
+        print(f"[Saved] Raw matrix to {raw_matrix_file}")
+
         # Save corrected matrix to a file
         corrected_matrix_file = "camera/corrected_matrix.json"
         with open(corrected_matrix_file, "w") as f:
@@ -552,7 +558,7 @@ class PlateProcessor:
         cv2.imwrite("camera/output_with_centers_corr.jpg", marked)
         print("[Saved] camera/output_with_centers_corr.jpg")
         #return corr
-        return disp_raw
+        return raw_bs
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════
 if __name__ == "__main__":
