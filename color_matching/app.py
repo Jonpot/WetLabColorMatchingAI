@@ -166,7 +166,7 @@ def _ai_step() -> None:
             for i, volume in enumerate(vols):
                 if volume > 0:
                     robot.add_add_color_action(
-                        color_slot=color_slots[i],
+                        tip_ID=color_slots[i],
                         plate_well=well_coordinate,
                         volume=volume,
                     )
@@ -314,7 +314,7 @@ if make_btn:
     total_vol = 0
     for slot, vol in volumes.items():
         if vol > 0:
-            robot.add_add_color_action(color_slot=slot,
+            robot.add_add_color_action(tip_ID=slot,
                                        plate_well=target_well,
                                        volume=int(vol))
             total_vol += vol

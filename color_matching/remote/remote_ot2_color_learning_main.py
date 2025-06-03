@@ -109,26 +109,29 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         return colors, plate, pipette, tiprack_state, off_deck_tipracks
 
-    def pick_up_tip(color_slot: str = None) -> None:
+    def pick_up_tip(tip_ID: str = None) -> None:
         """
         Picks up a tip from the tip rack.
         """
         global tiprack_state, reduced_tips_info
+        if pipette.has_tip:
+            pipette.drop_tip()
+            protocol.comment(f"Dropped tip for color slot {tip_ID}.")
 
         if reduced_tips_info is not None:
-            if color_slot not in reduced_tips_info:
+            if tip_ID not in reduced_tips_info:
                 try:
-                    color_slot_well = tiprack_state.index(True)
+                    tip_ID_well = tiprack_state.index(True)
                 except ValueError:
-                    raise TiprackEmptyError(f"No tips left in the tip rack to assign for {color_slot}.")
-                reduced_tips_info[color_slot] = color_slot_well
-                protocol.comment(f"Using tip {color_slot_well} for color slot {color_slot}.")
-                tiprack_state[color_slot_well] = False
+                    raise TiprackEmptyError(f"No tips left in the tip rack to assign for {tip_ID}.")
+                reduced_tips_info[tip_ID] = tip_ID_well
+                protocol.comment(f"Using tip {tip_ID_well} for tip ID {tip_ID}.")
+                tiprack_state[tip_ID_well] = False
 
-            # At this point, this color slot has a dedicated tip assigned to it.
+            # At this point, this tip ID has a dedicated tip assigned to it.
             # Pick up this tip
-            protocol.comment(f"Picking up tip {reduced_tips_info[color_slot]} for color slot {color_slot}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]]}")
-            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[color_slot]])
+            protocol.comment(f"Picking up tip {reduced_tips_info[tip_ID]} for tip ID {tip_ID}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID]]}")
+            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID]])
             return
             
 
@@ -151,7 +154,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.pick_up_tip(location=pipette.tip_racks[0].well(next_well))
         tiprack_state[next_well] = False
 
-    def return_tip(color_slot: str = None) -> None:
+    def return_tip(tip_ID: str = None) -> None:
         """
         Returns the tip to the tip rack.
         """
@@ -159,13 +162,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         if reduced_tips_info is not None:
             # Then we need to return this tip back to the tip rack
-            if color_slot not in reduced_tips_info:
-                protocol.comment(f"Something is wrong. Tip {color_slot} is not in reduced_tips_info: {reduced_tips_info}, but then I don't know how I got this tip.")
+            if tip_ID not in reduced_tips_info:
+                protocol.comment(f"Something is wrong. Tip {tip_ID} is not in reduced_tips_info: {reduced_tips_info}, but then I don't know how I got this tip.")
                 pipette.drop_tip()
                 return 
             
-            color_slot_well = reduced_tips_info[color_slot]
-            protocol.comment(f"Returning tip to tipbox slot {color_slot_well}.")
+            tip_ID_well = reduced_tips_info[tip_ID]
+            protocol.comment(f"Returning tip to tipbox slot {tip_ID_well}.")
             pipette.return_tip()
         else:
             pipette.drop_tip()
@@ -213,7 +216,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     def add_color(
             color_slot: str | int,
             plate_well: str,
-            volume: float) -> None:
+            volume: float,
+            new_tip: bool = True) -> None:
         """
         Adds a color to the plate at the specified well.
 
@@ -227,7 +231,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
             raise WellFullError("Cannot add color to well; well is full.")
 
-        pick_up_tip(color_slot)
+        if new_tip:
+            pick_up_tip(tip_ID=color_slot)
+
         pipette.aspirate(volume, colors[color_slot])
         pipette.touch_tip(plate.labware[plate_well], v_offset=15, radius=0) # necessary to avoid crashing against the large adapter
         pipette.dispense(volume, plate.labware[plate_well].bottom(z=1))
@@ -237,8 +243,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         # Blowout the remaining liquid in the pipette
         pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
-        return_tip(color_slot)
-    
+        if new_tip:
+            return_tip(tip_ID=color_slot)
+
     def mix(
             plate_well: str | int,
             volume: float,
@@ -294,8 +301,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         
         # if using reduced tips, move all the tips to trash
         if reduced_tips_info is not None:
-            for color_slot, tip in reduced_tips_info.items():
-                protocol.comment(f"Returning tip {tip} to trash for color slot {color_slot}.")
+            for tip_ID, tip in reduced_tips_info.items():
+                protocol.comment(f"Returning tip {tip} to trash for tip ID {tip_ID}.")
                 pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[tip])
                 pipette.drop_tip()
 
@@ -413,11 +420,18 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     refresh_tiprack()
                 elif subaction_name == "add_color":
                     try:
-                        add_color(subaction_args["color_slot"], subaction_args["plate_well"], subaction_args["volume"])
+                        add_color(subaction_args["color_slot"], subaction_args["plate_well"], subaction_args["volume"], subaction_args["new_tip"])
                     except WellFullError as e:
                         return failed_to_run_actions(e)
                     except TiprackEmptyError as e:
                         return failed_to_run_actions(e)
+                elif subaction_name == "get_tip":
+                    try:
+                        pick_up_tip(tip_ID=subaction_args["tip_ID"])
+                    except TiprackEmptyError as e:
+                        return failed_to_run_actions(e)
+                elif subaction_name == "return_tip":
+                    return_tip(tip_ID=subaction_args.get("tip_ID", None))
                 elif subaction_name == "mix":
                     mix(subaction_args["plate_well"], subaction_args["volume"], subaction_args["repetitions"])
                 elif subaction_name == "calibrate_96_well_plate":

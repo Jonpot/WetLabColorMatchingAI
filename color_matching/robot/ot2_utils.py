@@ -94,7 +94,7 @@ class OT2Manager:
             self._save_args_to_file("robot/args.jsonx")
             self._upload_file("robot/args.jsonx", "args.jsonx")
             # Ensure the latest protocol script is on the robot
-            self._upload_file("remote/remote_ot2_color_learning_main.py",
+            self._upload_file("color_matching/remote/remote_ot2_color_learning_main.py",
                               "remote_ot2_color_learning_main.py")
             self._start_robot_listener()
             self._listen_for_completion()
@@ -260,9 +260,17 @@ class OT2Manager:
         """Queue a refresh tip rack action."""
         self._add_action("refresh_tiprack")
 
-    def add_add_color_action(self, color_slot: str, plate_well: str, volume: float) -> None:
+    def add_add_color_action(self, color_slot: str, plate_well: str, volume: float, new_tip: bool = True) -> None:
         """Queue an add color action."""
-        self._add_action("add_color", {"color_slot": color_slot, "plate_well": plate_well, "volume": volume})
+        self._add_action("add_color", {"color_slot": color_slot, "plate_well": plate_well, "volume": volume, "new_tip": new_tip})
+
+    def add_get_tip_action(self, tip_ID: str = None) -> None:
+        """Queue a get tip action."""
+        self._add_action("get_tip", {"tip_ID": tip_ID})
+
+    def add_return_tip_action(self, tip_ID: str = None) -> None:
+        """Queue a return tip action."""
+        self._add_action("return_tip", {"tip_ID": tip_ID})
 
     def add_mix_action(self, plate_well: str, volume: float = 100, repetitions: int = 3) -> None:
         """Queue a mix action."""

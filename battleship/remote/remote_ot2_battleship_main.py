@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Tuple
 from opentrons import protocol_api
 import time
 
-color_slots = ['4','5','6','7','8','9','10','11']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 metadata = {
@@ -124,12 +123,12 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         if reduced_tips_info is not None:
             if tip_ID not in reduced_tips_info:
                 try:
-                    color_slot_well = tiprack_state.index(True)
+                    tip_ID_well = tiprack_state.index(True)
                 except ValueError:
                     raise TiprackEmptyError(f"No tips left in the tip rack to assign for {tip_ID}.")
-                reduced_tips_info[tip_ID] = color_slot_well
-                protocol.comment(f"Using tip {color_slot_well} for color slot {tip_ID}.")
-                tiprack_state[color_slot_well] = False
+                reduced_tips_info[tip_ID] = tip_ID_well
+                protocol.comment(f"Using tip {tip_ID_well} for color slot {tip_ID}.")
+                tiprack_state[tip_ID_well] = False
 
             # At this point, this color slot has a dedicated tip assigned to it.
             # Pick up this tip
@@ -157,7 +156,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.pick_up_tip(location=pipette.tip_racks[0].well(next_well))
         tiprack_state[next_well] = False
 
-    def return_tip(color_slot: str = None) -> None:
+    def return_tip(tip_ID: str = None) -> None:
         """
         Returns the tip to the tip rack.
         """
@@ -165,13 +164,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         if reduced_tips_info is not None:
             # Then we need to return this tip back to the tip rack
-            if color_slot not in reduced_tips_info:
-                protocol.comment(f"Something is wrong. Tip {color_slot} is not in reduced_tips_info: {reduced_tips_info}, but then I don't know how I got this tip.")
+            if tip_ID not in reduced_tips_info:
+                protocol.comment(f"Something is wrong. Tip {tip_ID} is not in reduced_tips_info: {reduced_tips_info}, but then I don't know how I got this tip.")
                 pipette.drop_tip()
                 return 
             
-            color_slot_well = reduced_tips_info[color_slot]
-            protocol.comment(f"Returning tip to tipbox slot {color_slot_well}.")
+            tip_ID_well = reduced_tips_info[tip_ID]
+            protocol.comment(f"Returning tip to tipbox slot {tip_ID_well}.")
             pipette.return_tip()
         else:
             pipette.drop_tip()
@@ -241,7 +240,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         # Blowout the remaining liquid in the pipette
         pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
-        return_tip(color_slot="missile")
+        return_tip(tip_ID="missile")
 
         mix(plate_well, min(200,volume*2), 3)
     
@@ -300,8 +299,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         
         # if using reduced tips, move all the tips to trash
         if reduced_tips_info is not None:
-            for color_slot, tip in reduced_tips_info.items():
-                protocol.comment(f"Returning tip {tip} to trash for color slot {color_slot}.")
+            for tip_ID, tip in reduced_tips_info.items():
+                protocol.comment(f"Returning tip {tip} to trash for tip ID {tip_ID}.")
                 pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[tip])
                 pipette.drop_tip()
 
@@ -394,7 +393,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         #         },
         #         {
         #            "add_color": {
-        #               "color_slot": "7",
+        #               "tip_ID": "7",
         #               "plate_well": "A1",
         #               "volume": 100
         #            }

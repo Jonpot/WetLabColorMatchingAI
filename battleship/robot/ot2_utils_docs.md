@@ -100,11 +100,11 @@ These methods allow you to queue specific actions which are then written to the 
   **Parameters:**  
   - `num_blinks`: Number of times to blink.
 
-- **`add_add_color_action(color_slot: str, plate_well: str, volume: float) -> None`**  
+- **`add_add_color_action(tip_ID: str, plate_well: str, volume: float) -> None`**  
   Queues an action to add color with specified parameters.
 
   **Parameters:**  
-  - `color_slot`: The slot identifier for the color.
+  - `tip_ID`: The slot identifier for the tip.
   - `plate_well`: The plate well location (e.g., "A1").
   - `volume`: The volume to add (in microliters or the applicable unit).
 
@@ -136,8 +136,8 @@ robot = OT2Manager(
 
 # Queue initial actions (turn on lights and add colors)
 robot.add_turn_on_lights_action()
-robot.add_add_color_action(color_slot='7', plate_well="A1", volume=30)
-robot.add_add_color_action(color_slot='8', plate_well="A2", volume=30)
+robot.add_add_color_action(tip_ID='7', plate_well="A1", volume=30)
+robot.add_add_color_action(tip_ID='8', plate_well="A2", volume=30)
 
 # Execute the queued actions remotely and wait for completion
 robot.execute_actions_on_remote()
@@ -145,7 +145,7 @@ robot.execute_actions_on_remote()
 # Queue follow-up actions (blink lights, turn off lights, add more color, close protocol)
 robot.add_blink_lights_action(num_blinks=5)
 robot.add_turn_off_lights_action()
-robot.add_add_color_action(color_slot='7', plate_well="A1", volume=30)
+robot.add_add_color_action(tip_ID='7', plate_well="A1", volume=30)
 robot.add_close_action()
 
 # Execute the new set of actions

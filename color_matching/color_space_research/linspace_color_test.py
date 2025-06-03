@@ -14,6 +14,8 @@ FORCE_REMOTE = True
 VIRTUAL_MODE = False 
 OT_NUMBER = 4
 
+COLORS = ["red", "yellow", "blue"]
+
 # ——— info.json ———
 with open(f"secret/OT_{OT_NUMBER}/info.json", "r") as f:
     info = {}
@@ -34,7 +36,7 @@ plate_rows_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
 plate_col_letters = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
 
 # Define color slots
-color_slots = {"red": "7", "yellow": "8", "blue": "9", "water": "11"}
+color_slots = {COLORS[0]: "7", COLORS[1]: "8", COLORS[2]: "9", "water": "11"}
 
 # Instantiate OT2Manager and PlateProcessor
 if not FORCE_REMOTE:
@@ -113,43 +115,32 @@ def create_random_recipe(colors: list[str], total_volume: int = 200, min_volume:
 # With 3 primary colors, this will 4*4*3 = 48 wells
 # Then, with the remaining 48 wells, create random recipes 
 protocol_recipes = []
-for color in ["red", "yellow", "blue"]:
+for color in COLORS:
     protocol_recipes.extend(create_replicate_linspace_recipe(20, 200, 4, color, total_volume=200, replicates=4))
 # Add random recipes for the remaining wells
 for _ in range(48):
-    protocol_recipes.append(create_random_recipe(["red", "yellow", "blue"], total_volume=200, min_volume=20))
+    protocol_recipes.append(create_random_recipe(COLORS, total_volume=200, min_volume=20))
 
 # Now, randomly shuffle the recipes then add them to the plate
 random.shuffle(protocol_recipes)
 # Add recipes to the plate as well as a dataframe
 # df will include the following columns:
-# well, red_vol, yellow_vol, blue_vol, water_vol, measured_red, measured_yellow, measured_blue
+# well, color1_vol, color2_vol, color3_vol, water_vol, measured_red, measured_green, measured_blue
 # The measured columns will be filled in later
-df = pd.DataFrame(columns=["well", "red_vol", "yellow_vol", "blue_vol", "water_vol", "measured_red", "measured_green", "measured_blue"])
+df = pd.DataFrame(columns=["well", f"{COLORS[0]}_vol", f"{COLORS[1]}_vol", f"{COLORS[2]}_vol", "water_vol", "measured_red", "measured_green", "measured_blue"])
 
-# Collect rows for batch DataFrame creation (for efficiency)
+# Collect rows for batch DataFrame creation
 df_rows = []
 for i, recipe in enumerate(protocol_recipes):
     row = plate_rows_letters[i // 12]
     col = plate_col_letters[i % 12]
     well = f"{row}{col}"
-    for color, volume in recipe.items():
-        if color in color_slots and volume >= 20:
-            robot.add_add_color_action(
-                color_slot = color_slots[color],
-                plate_well=well,
-                volume = volume,
-            )
-    robot.add_mix_action(
-        plate_well=well,
-        volume=100,
-        repetitions=3,
-    )
+    
     df_rows.append([
         well,
-        recipe.get("red", 0),
-        recipe.get("yellow", 0),
-        recipe.get("blue", 0),
+        recipe.get(COLORS[0], 0),
+        recipe.get(COLORS[1], 0),
+        recipe.get(COLORS[2], 0),
         recipe.get("water", 0),
         None,  # Placeholder for measured red
         None,  # Placeholder for measured green
@@ -159,8 +150,47 @@ for i, recipe in enumerate(protocol_recipes):
 if len(df_rows) > 0:
     df = pd.DataFrame(df_rows, columns=df.columns)
 
+# Immediately save the initial DataFrame to a CSV file
+df.to_csv("linspace_data_initial.csv", index=False)
+
+# Now, this could be an entry point if the recipes are already prepared, 
+# So let's load the csv file and add the recipes to the plate based on the DataFrame
+
+df = pd.read_csv("linspace_data_initial.csv")
+# Add the recipes to the plate
+# We'll use the 'well' column from the DataFrame directly
+for color in COLORS:
+    robot.add_get_tip_action(tip_ID=color)
+    for i, recipe in df.iterrows():
+        well = recipe["well"]
+        color_volume = recipe[color]
+        if color_volume > 0:
+            robot.add_add_color_action(
+                color_slot=color_slots[color],
+                plate_well=well,
+                volume=color_volume,
+                new_tip=False
+            )
+    robot.add_return_tip_action(tip_ID=color)
+# Add water to the plate
+robot.add_get_tip_action(tip_ID="water")
+for i, recipe in df.iterrows():
+    well = recipe["well"]
+    water_volume = recipe["water_vol"]
+    if water_volume > 0:
+        robot.add_add_color_action(
+            color_slot=color_slots["water"],
+            plate_well=well,
+            volume=water_volume,
+            new_tip=False
+        )
+robot.add_return_tip_action(tip_ID="water")
+
 # Execute actions
 robot.execute_actions_on_remote()
+
+# Honestly, while we could have the robot do the mixing, it's probably easier to just do it manually
+input("Please mix the plate manually. Press Enter to continue to measurement...")
 
 # Now, measure the colors in each well
 measured_plate = processor.process_image(cam_index=CAM_INDEX)
@@ -197,9 +227,9 @@ for i, recipe in enumerate(reversed(protocol_recipes)):
     # Collect new row for the rotated measurement
     prime_rows.append([
         well,
-        recipe.get("red", 0),
-        recipe.get("yellow", 0),
-        recipe.get("blue", 0),
+        recipe.get(COLORS[0], 0),
+        recipe.get(COLORS[1], 0),
+        recipe.get(COLORS[2], 0),
         recipe.get("water", 0),
         rgb[0],
         rgb[1],
@@ -209,19 +239,22 @@ if len(prime_rows) > 0:
     df_prime = pd.DataFrame(prime_rows, columns=df.columns)
     df = pd.concat([df, df_prime], ignore_index=True)
 
+# Save the dataframe to a CSV file
+df.to_csv("linspace_data.csv", index=False)
+
 # Turn off lights and close connection
 robot.add_turn_off_lights_action()
 robot.add_close_action()
 robot.execute_actions_on_remote()
 
-# Save the dataframe to a CSV file
-df.to_csv("linspace_data.csv", index=False)
 
 # Now, analyze the data and plot the results
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.colors as mcolors
 import matplotlib.ticker as ticker
+
+df = pd.read_csv("linspace_data.csv")
 
 # Set the color palette
 palette = sns.color_palette("husl", 3)
