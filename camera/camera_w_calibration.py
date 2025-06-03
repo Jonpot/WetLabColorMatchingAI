@@ -88,11 +88,13 @@ class PlateProcessor:
             cap.set(4, h)
             time.sleep(0.2)
 
+        print("Warming up camera...")
         for _ in range(warm):          # let exposure settle
             cap.read()
-            time.sleep(0.4)
+            time.sleep(0.04)
 
         acc = None
+        print("Capturing burst...")
         for _ in range(burst):
             _, frm = cap.read()
             acc = frm.astype(np.float32) if acc is None else acc + frm

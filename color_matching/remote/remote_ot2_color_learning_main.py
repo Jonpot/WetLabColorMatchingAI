@@ -236,7 +236,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         pipette.aspirate(volume, colors[color_slot])
         pipette.touch_tip(plate.labware[plate_well], v_offset=15, radius=0) # necessary to avoid crashing against the large adapter
-        pipette.dispense(volume, plate.labware[plate_well].bottom(z=1))
+        pipette.dispense(volume, plate.labware[plate_well].bottom(z=5))
 
         plate.wells[plate_well].volume += volume
 
@@ -264,8 +264,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
         # Quick mix (has to be manual because the default mix function doesn't work with the large adapter)
         for _ in range(repititions):
-            pipette.aspirate(volume, plate.labware[plate_well].bottom(z=1))
-            pipette.dispense(volume, plate.labware[plate_well].bottom(z=1))
+            pipette.aspirate(volume, plate.labware[plate_well].bottom(z=5))
+            pipette.dispense(volume, plate.labware[plate_well].bottom(z=5))
 
         # Blowout the remaining liquid in the pipette
         pipette.blow_out(plate.labware[plate_well].bottom(z=15))

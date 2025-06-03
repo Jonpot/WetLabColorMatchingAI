@@ -6,6 +6,8 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 from sklearn.decomposition import PCA
 
+COLORS = ['red', 'yellow', 'blue']
+
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 def load_plate_data(csv_path):
@@ -18,13 +20,13 @@ def load_plate_data(csv_path):
 
 def compute_fractions(df):
     # total volume is 200 uL
-    for dye in ['red','yellow','green','water']:
+    for dye in COLORS + ['water']:
         df[f'{dye}_frac'] = df[f'{dye}_vol'] / 200
     return df
 
 def split_experiments(df):
     # Linear tests: exactly one dye has nonzero volume and that is a multiple of 20
-    dyes = ['red','yellow','green']
+    dyes = COLORS
     is_linear = df.apply(
         lambda r: sum(r[f'{d}_vol']>0 for d in dyes)==1
                   and r['water_vol']>=0, axis=1
@@ -36,7 +38,7 @@ def split_experiments(df):
 def analyze_linear(df_lin, outdir='linear_results'):
     Path(outdir).mkdir(exist_ok=True)
     results = {}
-    for dye in ['red','yellow','green']:
+    for dye in COLORS:
         # select rows where that dye is the only non‐zero
         sel = df_lin[df_lin[f'{dye}_vol']>0]
         if sel.empty:
@@ -86,7 +88,7 @@ def analyze_mixtures(df_mix, lin_fits, outdir='mix_results'):
     for channel in ['red','green','blue']:
         y_true = df_mix[f'measured_{channel}'].values
         y_pred = np.zeros_like(y_true, dtype=float)
-        for dye in ['red','yellow','green']:
+        for dye in COLORS:
             fit = lin_fits.loc[(dye,channel)]
             y_pred += df_mix[f'{dye}_frac'] * fit['slope'] + df_mix[f'{dye}_frac']*fit['intercept']
         # optionally add water term if you have it
@@ -109,16 +111,16 @@ def analyze_mixtures(df_mix, lin_fits, outdir='mix_results'):
 def analyze_mixtures_with_water(df_mix, lin_fits, df_all, outdir='mix_results'):
     """
     df_mix: mixture wells
-    lin_fits: slopes only (we’ll drop intercepts here)
+    lin_fits: slopes only (we'll drop intercepts here)
     df_all: full DataFrame (so we can find pure-water wells)
     """
     Path(outdir).mkdir(exist_ok=True)
 
     # 1) find water-only baseline per channel
     water_wells = df_all[
-        (df_all.red_vol   == 0) &
-        (df_all.yellow_vol== 0) &
-        (df_all.green_vol == 0)
+        (df_all[f'{COLORS[0]}_vol']   == 0) &
+        (df_all[f'{COLORS[1]}_vol'] == 0) &
+        (df_all[f'{COLORS[2]}_vol'] == 0)
     ]
     baseline = {
         ch: water_wells[f'measured_{ch}'].mean()
@@ -134,7 +136,7 @@ def analyze_mixtures_with_water(df_mix, lin_fits, df_all, outdir='mix_results'):
             df_mix['water_frac'] * baseline[ch]
             + sum(
                 df_mix[f'{dye}_frac'] * lin_fits.loc[(dye,ch),'slope']
-                for dye in ['red','yellow','green']
+                for dye in COLORS
             )
         )
 
@@ -165,9 +167,9 @@ def analyze_mixtures_with_intercept(df_mix, lin_fits, df_all, outdir='mix_result
 
     # 1) estimate single baseline per channel
     water = df_all[
-        (df_all.red_vol    == 0) &
-        (df_all.yellow_vol == 0) &
-        (df_all.green_vol  == 0)
+        (df_all[f"{COLORS[0]}_vol"]    == 0) &
+        (df_all[f"{COLORS[1]}_vol"] == 0) &
+        (df_all[f"{COLORS[2]}_vol"]  == 0)
     ]
     baseline = {ch: water[f'measured_{ch}'].mean()
                 for ch in ['red','green','blue']}
@@ -179,7 +181,7 @@ def analyze_mixtures_with_intercept(df_mix, lin_fits, df_all, outdir='mix_result
         # 2) build prediction = intercept + sum(frac*slope)
         y_pred = baseline[ch] + sum(
             df_mix[f'{dye}_frac'] * lin_fits.loc[(dye,ch),'slope']
-            for dye in ['red','yellow','green']
+            for dye in COLORS
         )
 
         # 3) compute RMSE + plot
@@ -224,7 +226,7 @@ import seaborn as sns  # only for nicer default styles
 def plot_linearity_curves(df_lin, lin_fits, outdir='linear_results'):
     """3×3 grid: each row=dye, each col=channel, showing data+fit overlay."""
     sns.set(style="whitegrid")
-    dyes = ['red','yellow','green']
+    dyes = COLORS
     channels = ['red','green','blue']
     fig, axes = plt.subplots(3, 3, figsize=(12,12), sharex=True, sharey=True)
 
@@ -250,7 +252,7 @@ def plot_mixture_nonlinearity(df_mix, lin_fits, df_all, outdir='mix_results'):
     Path(outdir).mkdir(exist_ok=True)
     # rebuild baseline once
     water = df_all[
-        (df_all.red_vol==0)&(df_all.yellow_vol==0)&(df_all.green_vol==0)
+        (df_all[f"{COLORS[0]}_vol"]==0)&(df_all[f"{COLORS[1]}_vol"]==0)&(df_all[f"{COLORS[2]}_vol"]==0)
     ]
     baseline = {ch: water[f'measured_{ch}'].mean()
                 for ch in ['red','green','blue']}
@@ -260,7 +262,7 @@ def plot_mixture_nonlinearity(df_mix, lin_fits, df_all, outdir='mix_results'):
         y_true = df_mix[f'measured_{ch}']
         y_pred = baseline[ch] + sum(
             df_mix[f'{dye}_frac'] * lin_fits.loc[(dye,ch),'slope']
-            for dye in ['red','yellow','green']
+            for dye in COLORS
         )
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         ax.scatter(y_pred, y_true, alpha=0.6)
@@ -345,4 +347,4 @@ def main(csv_path):
     print('All plots saved to linear_results/, mix_results/, pca/')
 
 if __name__ == '__main__':
-    main("color_space_testing/ot_2_lighting/linspace_data.csv")
+    main("color_matching/color_space_research/6_3_25_strong_red/linspace_data.csv")
