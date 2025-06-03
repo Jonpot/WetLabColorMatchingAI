@@ -10,9 +10,9 @@ from camera.camera_w_calibration import PlateProcessor
 import json
 import time
 
-FORCE_REMOTE = False
+FORCE_REMOTE = True
 VIRTUAL_MODE = False 
-OT_NUMBER = 2
+OT_NUMBER = 4
 
 # ——— info.json ———
 with open(f"secret/OT_{OT_NUMBER}/info.json", "r") as f:
@@ -34,7 +34,7 @@ plate_rows_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
 plate_col_letters = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
 
 # Define color slots
-color_slots = {"red": "7", "yellow": "8", "green": "9", "water": "11"}
+color_slots = {"red": "7", "yellow": "8", "blue": "9", "water": "11"}
 
 # Instantiate OT2Manager and PlateProcessor
 if not FORCE_REMOTE:
@@ -113,19 +113,19 @@ def create_random_recipe(colors: list[str], total_volume: int = 200, min_volume:
 # With 3 primary colors, this will 4*4*3 = 48 wells
 # Then, with the remaining 48 wells, create random recipes 
 protocol_recipes = []
-for color in ["red", "yellow", "green"]:
+for color in ["red", "yellow", "blue"]:
     protocol_recipes.extend(create_replicate_linspace_recipe(20, 200, 4, color, total_volume=200, replicates=4))
 # Add random recipes for the remaining wells
 for _ in range(48):
-    protocol_recipes.append(create_random_recipe(["red", "yellow", "green"], total_volume=200, min_volume=20))
+    protocol_recipes.append(create_random_recipe(["red", "yellow", "blue"], total_volume=200, min_volume=20))
 
 # Now, randomly shuffle the recipes then add them to the plate
 random.shuffle(protocol_recipes)
 # Add recipes to the plate as well as a dataframe
 # df will include the following columns:
-# well, red_vol, green_vol, blue_vol, water_vol, measured_red, measured_green, measured_blue
+# well, red_vol, yellow_vol, blue_vol, water_vol, measured_red, measured_yellow, measured_blue
 # The measured columns will be filled in later
-df = pd.DataFrame(columns=["well", "red_vol", "yellow_vol", "green_vol", "water_vol", "measured_red", "measured_green", "measured_blue"])
+df = pd.DataFrame(columns=["well", "red_vol", "yellow_vol", "blue_vol", "water_vol", "measured_red", "measured_green", "measured_blue"])
 
 # Collect rows for batch DataFrame creation (for efficiency)
 df_rows = []
@@ -149,7 +149,7 @@ for i, recipe in enumerate(protocol_recipes):
         well,
         recipe.get("red", 0),
         recipe.get("yellow", 0),
-        recipe.get("green", 0),
+        recipe.get("blue", 0),
         recipe.get("water", 0),
         None,  # Placeholder for measured red
         None,  # Placeholder for measured green
@@ -199,7 +199,7 @@ for i, recipe in enumerate(reversed(protocol_recipes)):
         well,
         recipe.get("red", 0),
         recipe.get("yellow", 0),
-        recipe.get("green", 0),
+        recipe.get("blue", 0),
         recipe.get("water", 0),
         rgb[0],
         rgb[1],

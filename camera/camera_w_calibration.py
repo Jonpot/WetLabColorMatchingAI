@@ -90,7 +90,7 @@ class PlateProcessor:
 
         for _ in range(warm):          # let exposure settle
             cap.read()
-            time.sleep(0.04)
+            time.sleep(0.4)
 
         acc = None
         for _ in range(burst):
@@ -590,6 +590,7 @@ if __name__ == "__main__":
 
         from color_matching.robot.ot2_utils import OT2Manager
         try:
+            raise NotImplementedError("temp bypass to force remote")
             robot = OT2Manager(hostname=local_ip,
                                username="root",
                                password=local_pw,
