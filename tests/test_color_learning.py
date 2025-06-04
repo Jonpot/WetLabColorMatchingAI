@@ -29,13 +29,11 @@ class ColorLearningTests(unittest.TestCase):
             self.assertGreaterEqual(v, 0)
             self.assertLessEqual(v, opt.max_well_volume)
 
-    def test_mlp_active_training_and_suggestion(self):
+    def test_active_training_and_suggestion(self):
         opt = ColorLearningOptimizer(
             dye_count=2,
             max_well_volume=100,
             step=10,
-            optimization_mode="mlp_active",
-            n_models=2,
         )
         # simple linear mixing model: dye1 controls red, dye2 controls green
         for v1 in range(0, 101, 50):
