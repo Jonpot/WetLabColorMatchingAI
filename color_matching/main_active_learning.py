@@ -163,9 +163,7 @@ def run_active_learning() -> None:
         step=1,
         tolerance=15,
         min_required_volume=20,
-        n_models=5,
         exploration_weight=1.0,
-        initial_force_all_dyes=True,
         single_row_learning=True,
     )
 

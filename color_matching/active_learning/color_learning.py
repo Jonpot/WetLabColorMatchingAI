@@ -1,53 +1,47 @@
 """Active learning optimizer used by the colour matching robot."""
 
-import numpy as np
-import random
+"""Active learning utilities for colour matching."""
+
 import math
-from sklearn.neural_network import MLPRegressor
-from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
-from sklearn.preprocessing import MinMaxScaler
-from scipy.optimize import nnls
-from scipy.linalg import lstsq
+import random
+from typing import List
+
+import numpy as np
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
 
 class ColorLearningOptimizer:
-    def __init__(self, 
+    """Bayesian optimisation based colour mixing helper."""
+
+    def __init__(self,
                  dye_count: int,
                  max_well_volume: int = 200,
                  step: int = 1,
                  tolerance: int = 30,
                  min_required_volume: int = 20,
-                 n_models: int = 5,
+                 n_models: int = 3,
                  exploration_weight: float = 1.0,
-                 initial_explore_count: int = 3,
-                 initial_force_all_dyes: bool = False,
-                 single_row_learning: bool = True,):
+                 single_row_learning: bool = True,
+                 optimization_mode: str | None = None,
+                 **_ignored: object) -> None:
         self.dye_count = dye_count
         self.max_well_volume = max_well_volume
         self.step = step
         self.tolerance = tolerance
         self.min_required_volume = min_required_volume
-        self.n_models = n_models
         self.exploration_weight = exploration_weight
-        self.initial_explore_count = initial_explore_count
-        self.initial_force_all_dyes = initial_force_all_dyes
         self.single_row_learning = single_row_learning
 
+        # Gaussian processes for each RGB channel
+        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-3, 1e3)) + WhiteKernel()
+        self.models: List[GaussianProcessRegressor] = [
+            GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=42 + i)
+            for i in range(3)
+        ]
 
-        self.X_train = []
-        self.Y_train = []
 
-        self.models = [MLPRegressor(hidden_layer_sizes=(32, 32), max_iter=5000, random_state=42+i) for i in range(self.n_models)]
-
-    def _forced_full_dye_combination(self) -> list:
-        vols = [self.min_required_volume] * self.dye_count
-        total = sum(vols)
-        scale = self.max_well_volume / total
-        vols = [int(v * scale) for v in vols]
-
-        diff = self.max_well_volume - sum(vols)
-        if diff != 0:
-            vols[np.argmax(vols)] += diff
-        return vols
+        self.X_train: List[List[int]] = []
+        self.Y_train: List[List[int]] = []
     
     def reset(self):
         if self.single_row_learning:
@@ -55,18 +49,19 @@ class ColorLearningOptimizer:
             self.Y_train = []
 
 
-    def add_data(self, volumes: list, measured_color: list):
+    def add_data(self, volumes: list, measured_color: list) -> None:
+        """Add an observed colour measurement."""
         self.X_train.append(volumes)
         self.Y_train.append(measured_color)
-        if len(self.X_train) >= 2:
-            for model in self.models:
-                model.fit(self.X_train, self.Y_train)
+        if len(self.X_train) >= 1:
+            X = np.array(self.X_train)
+            Y = np.array(self.Y_train)
+            for c, model in enumerate(self.models):
+                model.fit(X, Y[:, c])
 
     def suggest_next_experiment(self, target_color: list) -> list:
-        if self.initial_force_all_dyes and self.initial_explore_count > 0:
-            self.initial_explore_count -= 1
-            return self._forced_full_dye_combination()
-        volumes = self._mlp_active_optimize(target_color)
+        """Propose the next dye volumes to test."""
+        volumes = self._gp_optimize(target_color)
         return volumes
 
     def calculate_distance(self, color, target_color) -> float:
@@ -138,9 +133,9 @@ class ColorLearningOptimizer:
 
         return adjusted
 
-    def _mlp_active_optimize(self, target_rgb: list) -> list:
-        """Suggest volumes by directly optimising the model prediction."""
-        if len(self.X_train) < 2:
+    def _gp_optimize(self, target_rgb: list) -> list:
+        """Suggest volumes by optimising the Gaussian process model."""
+        if len(self.X_train) < self.dye_count + 1:
             return self._random_combination()
 
         from scipy.optimize import minimize
@@ -151,16 +146,29 @@ class ColorLearningOptimizer:
             vols = np.clip(vols, 0, self.max_well_volume)
             vols = self._apply_min_volume_constraint(vols.tolist())
             x = np.array(vols).reshape(1, -1)
-            preds = np.array([m.predict(x)[0] for m in self.models])
-            mean_pred = np.mean(preds, axis=0)
-            std_pred = np.std(preds, axis=0)
+
+            means = []
+            stds = []
+            for model in self.models:
+                mean, std = model.predict(x, return_std=True)
+                means.append(mean[0])
+                stds.append(std[0])
+
+            mean_pred = np.array(means)
+            std_pred = np.array(stds)
             dist = np.linalg.norm(mean_pred - target)
-            dist -= self.exploration_weight * np.linalg.norm(std_pred)
-            return dist
+            return dist - self.exploration_weight * np.linalg.norm(std_pred)
 
         x0 = np.array(self._random_combination(), dtype=float)
         bounds = [(0, self.max_well_volume) for _ in range(self.dye_count)]
 
-        result = minimize(objective, x0, method="L-BFGS-B", bounds=bounds, options={"maxiter": 100})
+        result = minimize(
+            objective,
+            x0,
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={"maxiter": 100},
+        )
+
         best_vols = result.x if result.success else x0
         return self._apply_min_volume_constraint(best_vols.tolist())
