@@ -71,16 +71,7 @@ class ColorLearningOptimizer:
         if self.initial_force_all_dyes and self.initial_explore_count > 0:
             self.initial_explore_count -= 1
             return self._forced_full_dye_combination()
-        if self.optimization_mode == "mlp_active":
-            volumes = self._mlp_active_optimize(target_color)
-        elif self.optimization_mode == "unmixing":
-            volumes = self._color_unmixing_optimize(target_color)
-        elif self.optimization_mode == "random_forest":
-            volumes = self._random_forest_optimize(target_color)
-        elif self.optimization_mode == "extratree_active":
-            volumes = self._extratree_active_optimize(target_color)
-        else:
-            raise ValueError(f"Unknown optimization mode: {self.optimization_mode}")
+        volumes = self._mlp_active_optimize(target_color)
         return volumes
 
     def calculate_distance(self, color, target_color) -> float:
@@ -178,101 +169,3 @@ class ColorLearningOptimizer:
         result = minimize(objective, x0, method="L-BFGS-B", bounds=bounds, options={"maxiter": 100})
         best_vols = result.x if result.success else x0
         return self._apply_min_volume_constraint(best_vols.tolist())
-
-    def _extratree_active_optimize(self, target_rgb: list) -> list:
-        if len(self.X_train) == 0:
-            return self._random_combination()
-
-        scaler = MinMaxScaler()
-        X_train_scaled = scaler.fit_transform(self.X_train)
-
-        n_estimators = min(100, max(10, len(self.X_train) * 5))
-        et = ExtraTreesRegressor(n_estimators=n_estimators, random_state=42)
-
-        try:
-            et.fit(X_train_scaled, self.Y_train)
-        except Exception as e:
-            print(f"ExtraTrees training failed: {e}")
-            return self._random_combination()
-
-        candidates = [self._random_combination() for _ in range(self.candidate_num)]
-        X_candidates_scaled = scaler.transform(candidates)
-
-        try:
-            preds = np.array([tree.predict(X_candidates_scaled) for tree in et.estimators_])
-            mean_preds = np.mean(preds, axis=0)
-            std_preds = np.std(preds, axis=0)
-
-            mean_distances = np.linalg.norm(mean_preds - np.array(target_rgb), axis=1)
-            uncertainty_scores = np.linalg.norm(std_preds, axis=1)
-
-            acquisition_scores = -mean_distances + self.exploration_weight * uncertainty_scores
-
-            best_idx = np.argmax(acquisition_scores)
-            return candidates[best_idx]
-
-        except Exception as e:
-            print(f"ExtraTrees prediction failed: {e}")
-            return self._random_combination()
-
-    def _random_forest_optimize(self, target_rgb: list) -> list:
-        if len(self.X_train) == 0:
-            return self._random_combination()
-
-        scores = np.array([self._color_distance_score(color, target_rgb) for color in self.Y_train])
-        scaler = MinMaxScaler()
-        X_train_scaled = scaler.fit_transform(self.X_train)
-        n_estimators = min(100, max(10, len(self.X_train) * 5))
-        rf = RandomForestRegressor(n_estimators=n_estimators, random_state=42)
-
-        try:
-            rf.fit(X_train_scaled, scores)
-        except Exception as e:
-            print(f"Random Forest training failed: {e}")
-            return self._random_combination()
-
-        candidates = [self._random_combination() for _ in range(self.candidate_num)]
-        X_candidates_scaled = scaler.transform(candidates)
-
-        try:
-            predicted_scores = rf.predict(X_candidates_scaled)
-            tree_predictions = np.array([tree.predict(X_candidates_scaled) for tree in rf.estimators_])
-            uncertainties = np.var(tree_predictions, axis=0)
-            acquisition = predicted_scores + uncertainties
-            sorted_indices = np.argsort(acquisition)[::-1]
-            best = candidates[sorted_indices[0]]
-            return best
-
-        except Exception as e:
-            print(f"Random Forest prediction failed: {e}")
-            return self._random_combination()
-
-    def _color_distance_score(self, color, target_rgb, max_distance=441.7):
-        distance = self.calculate_distance(color, target_rgb)
-        return (1.0 - distance / max_distance) ** 3
-
-    def _color_unmixing_optimize(self, target_rgb: list) -> list:
-        if len(self.X_train) < 2:
-            return self._random_combination()
-
-        X = np.array(self.X_train)
-        X_norm = np.array([row / (np.sum(row) if np.sum(row) > 0 else 1) for row in X])
-        Y = np.array(self.Y_train)
-
-        try:
-            dye_colors = np.zeros((self.dye_count, 3))
-            for i in range(3):
-                result = lstsq(X_norm, Y[:, i], cond=None)
-                dye_colors[:, i] = result[0]
-            dye_colors = np.clip(dye_colors, 0, 255)
-
-            weights, _ = nnls(dye_colors, np.array(target_rgb))
-            if sum(weights) > 0:
-                weights = weights / sum(weights)
-
-            volumes = [int(w * self.max_well_volume) for w in weights]
-            return self._apply_min_volume_constraint(volumes)
-
-        except Exception as e:
-            print(f"Color unmixing optimization failed: {e}")
-            return self._random_combination()
