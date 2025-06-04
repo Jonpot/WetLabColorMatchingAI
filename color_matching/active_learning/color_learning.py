@@ -16,32 +16,27 @@ class ColorLearningOptimizer:
                  step: int = 1,
                  tolerance: int = 30,
                  min_required_volume: int = 20,
-                 optimization_mode: str = "mlp_active",
                  n_models: int = 5,
                  exploration_weight: float = 1.0,
                  initial_explore_count: int = 3,
                  initial_force_all_dyes: bool = False,
-                 candidate_num: int = 300,
                  single_row_learning: bool = True,):
         self.dye_count = dye_count
         self.max_well_volume = max_well_volume
         self.step = step
         self.tolerance = tolerance
         self.min_required_volume = min_required_volume
-        self.optimization_mode = optimization_mode
         self.n_models = n_models
         self.exploration_weight = exploration_weight
         self.initial_explore_count = initial_explore_count
         self.initial_force_all_dyes = initial_force_all_dyes
-        self.candidate_num = candidate_num
         self.single_row_learning = single_row_learning
 
 
         self.X_train = []
         self.Y_train = []
 
-        if self.optimization_mode == "mlp_active":
-            self.models = [MLPRegressor(hidden_layer_sizes=(32, 32), max_iter=5000, random_state=42+i) for i in range(self.n_models)]
+        self.models = [MLPRegressor(hidden_layer_sizes=(32, 32), max_iter=5000, random_state=42+i) for i in range(self.n_models)]
 
     def _forced_full_dye_combination(self) -> list:
         vols = [self.min_required_volume] * self.dye_count
@@ -63,7 +58,7 @@ class ColorLearningOptimizer:
     def add_data(self, volumes: list, measured_color: list):
         self.X_train.append(volumes)
         self.Y_train.append(measured_color)
-        if self.optimization_mode == "mlp_active" and len(self.X_train) >= 2:
+        if len(self.X_train) >= 2:
             for model in self.models:
                 model.fit(self.X_train, self.Y_train)
 
