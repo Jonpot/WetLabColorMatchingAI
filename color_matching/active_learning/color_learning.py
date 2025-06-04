@@ -39,14 +39,20 @@ class ColorLearningOptimizer:
             for i in range(3)
         ]
 
-
+        print("Initialized ColorLearningOptimizer with parameters:")
+        print(f"  Dye count: {self.dye_count}")
+        print(f"  Max well volume: {self.max_well_volume}")
+        print(f"  Step size: {self.step}")
+        print(f"  Tolerance: {self.tolerance}")
+        print(f"  Min required volume: {self.min_required_volume}")
         self.X_train: List[List[int]] = []
         self.Y_train: List[List[int]] = []
     
     def reset(self):
         if self.single_row_learning:
-            self.X_train = []
-            self.Y_train = []
+            print("Resetting optimizer for single row learning.")
+            self.X_train: List[List[int]] = []
+            self.Y_train: List[List[int]] = []
 
 
     def add_data(self, volumes: list, measured_color: list) -> None:
@@ -58,10 +64,13 @@ class ColorLearningOptimizer:
             Y = np.array(self.Y_train)
             for c, model in enumerate(self.models):
                 model.fit(X, Y[:, c])
+            print(f"Trained models with {len(self.X_train)} samples.")
+            print(f"Current training data: {self.X_train} -> {self.Y_train}")
 
     def suggest_next_experiment(self, target_color: list) -> list:
         """Propose the next dye volumes to test."""
         volumes = self._gp_optimize(target_color)
+        print(f"Suggesting volumes: {volumes} for target color: {target_color}")
         return volumes
 
     def calculate_distance(self, color, target_color) -> float:
@@ -69,6 +78,10 @@ class ColorLearningOptimizer:
             sum((int(c1) - int(c2)) ** 2 for c1, c2 in zip(color, target_color))
         )
 
+    def update_exploration_weight(self, new_weight: float) -> None:
+        """Update the exploration weight for the optimization."""
+        self.exploration_weight = new_weight
+        print(f"Updated exploration weight to: {self.exploration_weight}")
 
     def within_tolerance(self, color: list, target_color: list) -> bool:
         return self.calculate_distance(color, target_color) <= self.tolerance
@@ -142,7 +155,7 @@ class ColorLearningOptimizer:
 
         target = np.array(target_rgb)
 
-        def objective(vols: np.ndarray) -> float:
+        def objective(vols: np.ndarray, report = False) -> float:
             vols = np.clip(vols, 0, self.max_well_volume)
             vols = self._apply_min_volume_constraint(vols.tolist())
             x = np.array(vols).reshape(1, -1)
@@ -157,6 +170,12 @@ class ColorLearningOptimizer:
             mean_pred = np.array(means)
             std_pred = np.array(stds)
             dist = np.linalg.norm(mean_pred - target)
+            if report:
+                print(f"Objective: {dist}, Means: {mean_pred}, Stds: {std_pred}")
+                if dist < self.exploration_weight * np.linalg.norm(std_pred):
+                    print("These volumes were chosen primarily based on exploitation.")
+                else:
+                    print("These volumes were chosen primarily based on exploration.")
             return dist - self.exploration_weight * np.linalg.norm(std_pred)
 
         x0 = np.array(self._random_combination(), dtype=float)

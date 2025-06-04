@@ -24,7 +24,7 @@ def rerun() -> None:
         st.rerun()
 
 # ——— CONFIG ———
-COLOR_THRESHOLD = 60
+COLOR_THRESHOLD = 20
 ROWS = [chr(i) for i in range(ord("A"), ord("H")+1)]
 MAX_WELLS_PER_ROW = 12
 MYSTERY_COL = 1
@@ -34,14 +34,15 @@ MIN_VOL = 20
 MAX_VOL_SUM = 200
 VIRTUAL_MODE = False  # set to True for virtual mode
 
-OT_NUMBER = 2
+OT_NUMBER = 4
 
+WHITE_THRESHOLD = 100  # RGB threshold for white detection
 
 
 # Example available color slots
 color_slots = ["7", "8", "9"]
 
-FORCE_REMOTE = False  # set to True to force remote connection
+FORCE_REMOTE = True  # set to True to force remote connection
 
 # ——— info.json ———
 try:
@@ -58,27 +59,6 @@ try:
         remote_password = None if remote_password == "None" else remote_password
 
         CAM_INDEX = info.get("cam_index", 1)
-except FileNotFoundError:
-    st.error("Configuration file not found. Please ensure `info.json` exists in the `secret/OT_1/` directory.")
-    st.stop()
-except json.JSONDecodeError:
-    st.error("Error decoding JSON in `info.json`. Please check the file format.")
-    st.stop()
-
-
-# ——— info.json ———
-try:
-    with open(f"secret/OT_{OT_NUMBER}/info.json", "r") as f:
-        info = st.session_state.get("info", {})
-        info.update(json.load(f))
-        st.session_state.info = info
-        local_ip = info.get("local_ip", "169.254.122.0")
-        local_password = info.get("local_password", "lemos")
-        local_password = None if local_password == "None" else local_password
-
-        remote_ip = info.get("remote_ip", "172.26.192.201")
-        remote_password = info.get("remote_password", "None")
-        remote_password = None if remote_password == "None" else remote_password
 except FileNotFoundError:
     st.error("Configuration file not found. Please ensure `info.json` exists in the `secret/OT_1/` directory.")
     st.stop()
@@ -134,86 +114,13 @@ st.session_state.setdefault("ai_target", None)
 st.session_state.setdefault("ai_log", [])
 st.session_state.setdefault("ai_step_pending", False)
 
-
-def _ai_step() -> None:
-    """Execute one iteration of the active learning loop."""
-    row_letter: str = st.session_state.ai_row
-    optimizer: ColorLearningOptimizer = st.session_state.ai_optimizer
-    robot = st.session_state.robot
-    processor = st.session_state.processor
-    target_color: Iterable[int] = st.session_state.ai_target
-    iteration: int = st.session_state.ai_iter
-    used: set = st.session_state.ai_used_combos
-
-    column = iteration + 2
-    well_coordinate = f"{row_letter}{column}"
-    row_idx = ord(row_letter) - ord("A")
-
-    st.session_state.ai_log.append(
-        f"{row_letter} | Iter {iteration + 1} | Well {well_coordinate}"
-    )
-
-    while True:
-        vols = optimizer.suggest_next_experiment(list(target_color))
-        if tuple(vols) not in used:
-            used.add(tuple(vols))
-            break
-    st.session_state.ai_used_combos = used
-    st.session_state.ai_log.append(f"Suggested: {vols}")
-
-    while True:
-        try:
-            for i, volume in enumerate(vols):
-                if volume > 0:
-                    robot.add_add_color_action(
-                        tip_ID=color_slots[i],
-                        plate_well=well_coordinate,
-                        volume=volume,
-                    )
-            robot.add_mix_action(
-                plate_well=well_coordinate,
-                volume=optimizer.max_well_volume / 2,
-                repetitions=3,
-            )
-            robot.execute_actions_on_remote()
-            break
-        except RuntimeError:
-            if robot.last_error_type == TiprackEmptyError:
-                st.session_state.ai_log.append("Tiprack empty - refreshing")
-                robot.add_refresh_tiprack_action()
-                robot.execute_actions_on_remote()
-            else:
-                raise
-
-    color_data = processor.process_image(cam_index=CAM_INDEX,
-                                         calib=f"secret/OT_{OT_NUMBER}/calibration.json")
-    measured_color = color_data[row_idx][column - 1]
-    st.session_state.ai_log.append(f"Measured: {measured_color}")
-
-    optimizer.add_data(vols, measured_color)
-    distance = optimizer.calculate_distance(measured_color, target_color)
-    st.session_state.ai_log.append(f"Distance: {distance:.2f}")
-
-    hist = st.session_state[f"history_{row_letter}"]
-    hist.append((measured_color.tolist(), float(distance)))
-    st.session_state[f"guesses_{row_letter}"] += 1
-
-    if optimizer.within_tolerance(measured_color, target_color):
-        st.session_state.ai_log.append(f"Matched with {vols}")
-        st.session_state.ai_running = False
-    else:
-        st.session_state.ai_iter += 1
-        if st.session_state.ai_iter >= MAX_GUESSES:
-            st.session_state.ai_running = False
-
-
-if st.session_state.ai_running and st.session_state.ai_step_pending:
-    st.session_state.ai_step_pending = False
-    _ai_step()
-    if st.session_state.ai_running:
-        st.session_state.ai_step_pending = True
-        rerun()
-
+# Initialize AI optimizer if not already set
+if st.session_state.ai_optimizer is None:
+    st.session_state.ai_optimizer = ColorLearningOptimizer(
+            dye_count=len(color_slots),
+            tolerance=COLOR_THRESHOLD,
+            single_row_learning=False,
+        )
 
 # ——— UI ———
 st.title("🎨 Human vs Robot: Color-Mixing Challenge")
@@ -249,7 +156,7 @@ if st.session_state.get("last_row") != row:
     for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
         rgb = full_plate[ord(row) - ord("A")][col]
         # white threshold:
-        if any(ch < 130 for ch in rgb):
+        if any(ch < WHITE_THRESHOLD for ch in rgb):
             dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
             prehist.append((rgb.tolist(), dist))
 
@@ -349,10 +256,6 @@ if deploy_btn:
     st.session_state.ai_running = True
     st.session_state.ai_row = row
     st.session_state.ai_iter = 0
-    st.session_state.ai_optimizer = ColorLearningOptimizer(
-        dye_count=len(color_slots),
-        tolerance=COLOR_THRESHOLD,
-    )
     st.session_state.ai_used_combos = set()
     st.session_state.ai_target = st.session_state[f"mystery_rgb_{row}"]
     st.session_state.ai_log = []
@@ -410,4 +313,93 @@ if st.session_state[f"history_{row}"]:
 if st.session_state.ai_log:
     st.subheader("AI Log")
     st.text("\n".join(str(x) for x in st.session_state.ai_log))
-    
+
+# ——— AI STEP ———  
+
+def _ai_step() -> None:
+    """Execute one iteration of the active learning loop."""
+    row_letter: str = st.session_state.ai_row
+    optimizer: ColorLearningOptimizer = st.session_state.ai_optimizer
+    robot = st.session_state.robot
+    processor = st.session_state.processor
+    target_color: Iterable[int] = st.session_state.ai_target
+    iteration: int = st.session_state.ai_iter
+    used: set = st.session_state.ai_used_combos
+
+    column = iteration + 2
+    well_coordinate = f"{row_letter}{column}"
+    row_idx = ord(row_letter) - ord("A")
+
+    st.session_state.ai_log.append(
+        f"{row_letter} | Iter {iteration + 1} | Well {well_coordinate}"
+    )
+
+    # Update the exploration weight based on the number of guesses
+    if iteration < 3:
+        optimizer.update_exploration_weight(1.0)
+    else:
+        # Exploration weight should decrease as we get closer to the final well
+        # When idx is 11, the exploration weight should be 0
+        exploration_weight = max(0.0, 1.0 - (iteration) / (MAX_GUESSES))
+        optimizer.update_exploration_weight(exploration_weight)
+
+    while True:
+        vols = optimizer.suggest_next_experiment(list(target_color))
+        if tuple(vols) not in used:
+            used.add(tuple(vols))
+            break
+    st.session_state.ai_used_combos = used
+    st.session_state.ai_log.append(f"Suggested: {vols}")
+
+    while True:
+        try:
+            for i, volume in enumerate(vols):
+                if volume > 0:
+                    robot.add_add_color_action(
+                        color_slot=color_slots[i],
+                        plate_well=well_coordinate,
+                        volume=volume,
+                    )
+            robot.add_mix_action(
+                plate_well=well_coordinate,
+                volume=optimizer.max_well_volume / 2,
+                repetitions=3,
+            )
+            robot.execute_actions_on_remote()
+            break
+        except RuntimeError:
+            if robot.last_error_type == TiprackEmptyError:
+                st.session_state.ai_log.append("Tiprack empty - refreshing")
+                robot.add_refresh_tiprack_action()
+                robot.execute_actions_on_remote()
+            else:
+                raise
+
+    color_data = processor.process_image(cam_index=CAM_INDEX,
+                                         calib=f"secret/OT_{OT_NUMBER}/calibration.json")
+    measured_color = color_data[row_idx][column - 1]
+    st.session_state.ai_log.append(f"Measured: {measured_color}")
+
+    optimizer.add_data(vols, measured_color)
+    distance = optimizer.calculate_distance(measured_color, target_color)
+    st.session_state.ai_log.append(f"Distance: {distance:.2f}")
+
+    hist = st.session_state[f"history_{row_letter}"]
+    hist.append((measured_color.tolist(), float(distance)))
+    st.session_state[f"guesses_{row_letter}"] += 1
+
+    if optimizer.within_tolerance(measured_color, target_color):
+        st.session_state.ai_log.append(f"Matched with {vols}")
+        st.session_state.ai_running = False
+    else:
+        st.session_state.ai_iter += 1
+        if st.session_state.ai_iter >= MAX_GUESSES:
+            st.session_state.ai_running = False
+
+
+if st.session_state.ai_running and st.session_state.ai_step_pending:
+    st.session_state.ai_step_pending = False
+    _ai_step()
+    if st.session_state.ai_running:
+        st.session_state.ai_step_pending = True
+        rerun()
