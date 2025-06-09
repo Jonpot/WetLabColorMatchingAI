@@ -9,6 +9,7 @@ from typing import List
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
+from scipy.optimize import LinearConstraint
 
 class ColorLearningOptimizer:
     """Bayesian optimisation based colour mixing helper."""
@@ -16,11 +17,11 @@ class ColorLearningOptimizer:
     def __init__(self,
                  dye_count: int,
                  max_well_volume: int = 200,
-                 step: int = 1,
+                 step: int = 20,
                  tolerance: int = 30,
                  min_required_volume: int = 20,
                  n_models: int = 3,
-                 exploration_weight: float = 1.0,
+                 exploration_weight: float = 0.4,
                  single_row_learning: bool = True,
                  optimization_mode: str | None = None,
                  **_ignored: object) -> None:
@@ -31,9 +32,13 @@ class ColorLearningOptimizer:
         self.min_required_volume = min_required_volume
         self.exploration_weight = exploration_weight
         self.single_row_learning = single_row_learning
+        self.major_unseen_dyes = set()
+        for i in range(dye_count):
+            self.major_unseen_dyes.add(i)
 
         # Gaussian processes for each RGB channel
-        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * RBF(1.0, (1e-3, 1e3)) + WhiteKernel()
+        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * RBF(50.0, (1e-3, 1e3)) + WhiteKernel()
+        #kernel = ConstantKernel(1.0, (1e-3, 1e3)) * RBF(50.0, (1e-3, 1e3))
         self.models: List[GaussianProcessRegressor] = [
             GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=42 + i)
             for i in range(3)
@@ -69,6 +74,7 @@ class ColorLearningOptimizer:
 
     def suggest_next_experiment(self, target_color: list) -> list:
         """Propose the next dye volumes to test."""
+
         volumes = self._gp_optimize(target_color)
         print(f"Suggesting volumes: {volumes} for target color: {target_color}")
         return volumes
@@ -88,26 +94,32 @@ class ColorLearningOptimizer:
 
     def _random_combination(self) -> list:
         vols = [0] * self.dye_count
-        remain = self.max_well_volume
+        remaining_volume = self.max_well_volume
 
-        if remain > 0 and self.dye_count > 0:
-            primary_dye = random.randint(0, self.dye_count - 1)
-            vols[primary_dye] = self.step
-            remain -= self.step
+        if remaining_volume > 0 and self.dye_count > 0:
+            if len(self.major_unseen_dyes) > 0:
+                # Use a major unseen dye if available
+                primary_dye = random.choice(list(self.major_unseen_dyes))
+                self.major_unseen_dyes.remove(primary_dye)
+            else:
+                primary_dye = random.randint(0, self.dye_count - 1)
+            possible_steps = remaining_volume // self.step
+            vols[primary_dye] = random.randint(possible_steps//2, possible_steps) * self.step
+            remaining_volume -= vols[primary_dye]
 
         for i in range(self.dye_count):
-            if remain <= 0:
+            if remaining_volume <= 0:
                 break
             if random.random() < 0.7:
-                possible_steps = remain // self.step
+                possible_steps = remaining_volume // self.step
                 if possible_steps > 0:
                     vol = random.randint(0, possible_steps) * self.step
                     vols[i] += vol
-                    remain -= vol
+                    remaining_volume -= vol
 
-        if remain > 0 and self.dye_count > 0:
+        if remaining_volume > 0 and self.dye_count > 0:
             lucky_dye = random.randint(0, self.dye_count - 1)
-            vols[lucky_dye] += remain
+            vols[lucky_dye] += remaining_volume
 
         return self._apply_min_volume_constraint(vols)
 
@@ -147,7 +159,7 @@ class ColorLearningOptimizer:
         return adjusted
 
     def _gp_optimize(self, target_rgb: list) -> list:
-        """Suggest volumes by optimising the Gaussian process model."""
+        """Suggest volumes by optimizing the Gaussian process model with multiple random restarts."""
         if len(self.X_train) < self.dye_count + 1:
             return self._random_combination()
 
@@ -155,9 +167,8 @@ class ColorLearningOptimizer:
 
         target = np.array(target_rgb)
 
-        def objective(vols: np.ndarray, report = False) -> float:
+        def objective(vols: np.ndarray, report: bool = False) -> float:
             vols = np.clip(vols, 0, self.max_well_volume)
-            vols = self._apply_min_volume_constraint(vols.tolist())
             x = np.array(vols).reshape(1, -1)
 
             means = []
@@ -170,24 +181,57 @@ class ColorLearningOptimizer:
             mean_pred = np.array(means)
             std_pred = np.array(stds)
             dist = np.linalg.norm(mean_pred - target)
+
             if report:
                 print(f"Objective: {dist}, Means: {mean_pred}, Stds: {std_pred}")
-                if dist < self.exploration_weight * np.linalg.norm(std_pred):
+                print(f"Literal comparison: {dist} vs {(np.linalg.norm(std_pred)/(self.exploration_weight+1e-6))} ({np.linalg.norm(std_pred)}/{(self.exploration_weight+1e-6)})")
+                if dist < (np.linalg.norm(std_pred)/(self.exploration_weight+1e-6)):
                     print("These volumes were chosen primarily based on exploitation.")
                 else:
                     print("These volumes were chosen primarily based on exploration.")
+
             return dist - self.exploration_weight * np.linalg.norm(std_pred)
 
-        x0 = np.array(self._random_combination(), dtype=float)
+        # Define the constraint: d1 + d2 + d3 = 200
+        # The vector [1, 1, 1] means we sum all dye volumes.
+        # The lower and upper bounds are both 200, forcing the sum to be exactly 200.
+        constraint = LinearConstraint(np.ones(self.dye_count), [self.max_well_volume], [self.max_well_volume])
+
+
         bounds = [(0, self.max_well_volume) for _ in range(self.dye_count)]
+        num_restarts = 250
 
-        result = minimize(
-            objective,
-            x0,
-            method="L-BFGS-B",
-            bounds=bounds,
-            options={"maxiter": 100},
-        )
+        best_val = float('inf')
+        best_vols_continuous = None
 
-        best_vols = result.x if result.success else x0
-        return self._apply_min_volume_constraint(best_vols.tolist())
+        for _ in range(num_restarts):
+            x0_rand = np.random.rand(self.dye_count)
+            x0 = (x0_rand / np.sum(x0_rand)) * self.max_well_volume
+            result = minimize(
+                objective,
+                x0,
+                method="trust-constr",
+                bounds=bounds,
+                options={"maxiter": 100},
+                constraints=[constraint],
+            )
+
+            if result.success:
+                candidate = result.x
+                candidate_val = objective(candidate)
+            else:
+                candidate = x0
+                candidate_val = objective(x0)
+
+            if candidate_val < best_val:
+                best_val = candidate_val
+                best_vols_continuous = candidate
+
+        # Report the final chosen volumes
+        objective(best_vols_continuous, report=True)
+
+        # Convert the continuous optimum to discrete, valid volumes
+        best_vols_continuous = result.x
+        final_discrete_vols = self._apply_min_volume_constraint(best_vols_continuous.tolist())
+
+        return final_discrete_vols

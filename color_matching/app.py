@@ -14,7 +14,8 @@ import time
 from color_matching.active_learning.color_learning import ColorLearningOptimizer
 from typing import Iterable
 import itertools
-
+from sklearn.decomposition import PCA
+from GP_visualizer import plot_gp_predictions
 
 def rerun() -> None:
     """Trigger a Streamlit rerun regardless of version."""
@@ -36,11 +37,12 @@ VIRTUAL_MODE = False  # set to True for virtual mode
 
 OT_NUMBER = 4
 
-WHITE_THRESHOLD = 100  # RGB threshold for white detection
+WHITE_THRESHOLD = 80  # RGB threshold for white detection
 
 
 # Example available color slots
 color_slots = ["7", "8", "9"]
+dye_colors = ['r', 'y', 'b']  # red, yellow, blue, for visuals only, never to be fed to the AI
 
 FORCE_REMOTE = True  # set to True to force remote connection
 
@@ -115,12 +117,19 @@ st.session_state.setdefault("ai_log", [])
 st.session_state.setdefault("ai_step_pending", False)
 
 # Initialize AI optimizer if not already set
+#x_history = st.session_state.ai_optimizer.X_train.copy()
+#y_history = st.session_state.ai_optimizer.Y_train.copy()
+#print(f"AI history: {len(x_history)} samples, {len(y_history)} colors")
+#
+#st.session_state.ai_optimizer = None
 if st.session_state.ai_optimizer is None:
     st.session_state.ai_optimizer = ColorLearningOptimizer(
             dye_count=len(color_slots),
             tolerance=COLOR_THRESHOLD,
             single_row_learning=False,
         )
+    #st.session_state.ai_optimizer.X_train = x_history
+    #st.session_state.ai_optimizer.Y_train = y_history
 
 # ——— UI ———
 st.title("🎨 Human vs Robot: Color-Mixing Challenge")
@@ -310,9 +319,29 @@ if st.session_state[f"history_{row}"]:
 
     st.pyplot(fig)
 
+# ——— MODEL PLOT ———
+grid = np.linspace(0, MAX_VOL_SUM, 200)
+
+# Prepare a 3D plot
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+Y_train = np.array(st.session_state.ai_optimizer.Y_train)
+X_train = np.array(st.session_state.ai_optimizer.X_train)
+
+if len(Y_train) > 0:
+    fig = plot_gp_predictions(
+        gp_models=st.session_state.ai_optimizer.models,
+        X_train=X_train,
+        Y_train=Y_train
+    )
+    st.pyplot(fig)
+
+
 if st.session_state.ai_log:
     st.subheader("AI Log")
     st.text("\n".join(str(x) for x in st.session_state.ai_log))
+
 
 # ——— AI STEP ———  
 
@@ -335,19 +364,24 @@ def _ai_step() -> None:
     )
 
     # Update the exploration weight based on the number of guesses
-    if iteration < 3:
-        optimizer.update_exploration_weight(1.0)
+    if iteration < len(color_slots):
+        #optimizer.update_exploration_weight(0.4)
+        exploration_weight = 1
     else:
         # Exploration weight should decrease as we get closer to the final well
         # When idx is 11, the exploration weight should be 0
-        exploration_weight = max(0.0, 1.0 - (iteration) / (MAX_GUESSES))
+        exploration_weight = max(0.0, 1 - ((iteration) / (MAX_GUESSES)))
+        #exploration_weight = 0.0
         optimizer.update_exploration_weight(exploration_weight)
 
-    while True:
+    attempts_remaining = 10
+    while attempts_remaining > 0:
+        attempts_remaining -= 1
         vols = optimizer.suggest_next_experiment(list(target_color))
         if tuple(vols) not in used:
             used.add(tuple(vols))
             break
+
     st.session_state.ai_used_combos = used
     st.session_state.ai_log.append(f"Suggested: {vols}")
 
@@ -394,12 +428,17 @@ def _ai_step() -> None:
     else:
         st.session_state.ai_iter += 1
         if st.session_state.ai_iter >= MAX_GUESSES:
+            print("AI exhausted all guesses without matching.")
             st.session_state.ai_running = False
 
+print(st.session_state.ai_optimizer.X_train)
+print(st.session_state.ai_optimizer.Y_train)
 
-if st.session_state.ai_running and st.session_state.ai_step_pending:
+if st.session_state.ai_running or st.session_state.ai_step_pending:
     st.session_state.ai_step_pending = False
     _ai_step()
     if st.session_state.ai_running:
         st.session_state.ai_step_pending = True
-        rerun()
+    else:
+        st.success("AI has found a matching recipe or exhausted guesses.")
+    rerun()
