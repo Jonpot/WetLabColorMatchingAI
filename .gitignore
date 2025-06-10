@@ -11,3 +11,4 @@ camera/output_with_centers_corr.jpg
 camera/snapshot.jpg
 robot/args.jsonx
 camera/output_with_read_colors.jpg
+camera/raw_matrix.json

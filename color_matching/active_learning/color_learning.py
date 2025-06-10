@@ -220,7 +220,7 @@ class ColorLearningOptimizer:
 
 
         bounds = [(0, self.max_well_volume) for _ in range(self.dye_count)]
-        num_restarts = 250
+        num_restarts = 100
 
         best_val = float('inf')
         best_vols_continuous = None

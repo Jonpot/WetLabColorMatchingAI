@@ -37,7 +37,7 @@ VIRTUAL_MODE = False  # set to True for virtual mode
 
 OT_NUMBER = 4
 
-WHITE_THRESHOLD = 100  # RGB threshold for white detection
+WHITE_THRESHOLD = 120  # RGB threshold for white detection
 
 
 # Example available color slots
@@ -99,7 +99,7 @@ if "robot" not in st.session_state:
     print("Lights turned on.")
     time.sleep(2)  # wait for lights to stabilize
 
-    st.session_state.processor = PlateProcessor(virtual_mode=VIRTUAL_MODE)
+st.session_state.processor = PlateProcessor(virtual_mode=VIRTUAL_MODE)
 
 # track how many guesses we've made per row, and the measured RGBs+distances
 for row in ROWS:
@@ -219,6 +219,17 @@ if st.session_state[f"guesses_{row}"] == 0:
         "Deploy AI",
         disabled=st.session_state.ai_running,
     )
+
+stop_ai_btn = False
+if st.session_state.ai_running:
+    stop_ai_btn = st.button(
+        "Stop AI",
+        disabled=not st.session_state.ai_running,
+    )
+    if stop_ai_btn:
+        st.session_state.ai_running = False
+        st.session_state.ai_step_pending = False
+        rerun()
 
 reset_btn = st.button("Reset model knowledge", disabled=st.session_state.ai_running)
 restore_btn = st.button(
@@ -387,7 +398,7 @@ def _ai_step() -> None:
         #exploration_weight = 0.0
         optimizer.update_exploration_weight(exploration_weight)
 
-    attempts_remaining = 10
+    attempts_remaining = 3
     while attempts_remaining > 0:
         attempts_remaining -= 1
         vols = optimizer.suggest_next_experiment(list(target_color))

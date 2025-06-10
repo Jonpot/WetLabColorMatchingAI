@@ -32,8 +32,9 @@ class PlateProcessor:
     mirrors the ``OT2Manager``'s virtual mode for easier testing.
     """
 
-    def __init__(self, virtual_mode: bool = False) -> None:
+    def __init__(self, virtual_mode: bool = False, boost_saturation: bool = False) -> None:
         self.virtual_mode = virtual_mode
+        self.boost_saturation = boost_saturation
         # four plate corners
         self.pts: list[tuple[int, int]] = []
 
@@ -127,33 +128,6 @@ class PlateProcessor:
         return warped.reshape(rows, cols, 2)
 
     # ─────────────────────── per-well trimmed-mean colour ─────────────────
-    @staticmethod
-    def avg_rgb(img: np.ndarray, centers: np.ndarray,
-              win: int = 11, trim: float = 0.1) -> list:
-        """
-        For each centre, take a `win`×`win` patch, drop upper/lower
-        `trim` fraction, return RGB mean. Returns nested Python lists for
-        JSON serialisability.
-        """
-        out = []
-        h, w = img.shape[:2]
-        half = win // 2
-        k_trim = int((win * win) * trim)
-
-        for row in centers:
-            rrow = []
-            for cx, cy in row:
-                x, y = int(cx), int(cy)
-                x1, x2 = max(0, x - half), min(w, x + half + 1)
-                y1, y2 = max(0, y - half), min(h, y + half + 1)
-                patch = img[y1:y2, x1:x2].reshape(-1, 3).astype(np.float32)
-
-                if k_trim:                          # trimmed mean
-                    patch = np.sort(patch, axis=0)[k_trim:-k_trim] \
-                        if patch.shape[0] > 2 * k_trim else patch
-                rrow.append(patch.mean(axis=0)[::-1])  # BGR→RGB
-            out.append(rrow)
-        return out
 
     @staticmethod
     def gaussian_cluster_rgb(img: np.ndarray, centers: np.ndarray,
@@ -460,7 +434,12 @@ class PlateProcessor:
             raw_bs = np.array(raw, np.float32)
 
         # 3) Apply brightness and saturation adjustment
-        adjusted_bs = self.adjust_brightness_saturation(raw_bs)
+        if self.boost_saturation:
+            # Adjust brightness and saturation
+            adjusted_bs = self.adjust_brightness_saturation(raw_bs)
+        else:
+            # No adjustment, just use the raw baseline colors
+            adjusted_bs = raw_bs
 
         # Save adjusted matrix to a file
         raw_matrix_file = "camera/raw_matrix.json"
