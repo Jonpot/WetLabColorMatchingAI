@@ -4,6 +4,7 @@ import sys
 import importlib
 import inspect
 import pkgutil
+import time
 
 # --- Add project root to path ---
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -108,17 +109,16 @@ def plot_board(board: np.ndarray, title: str) -> plt.Figure:
     ax.set_yticklabels(list(ascii_uppercase[:rows]))
     ax.set_xlabel("Column")
     ax.set_ylabel("Row")
-    ax.set_title(title, fontsize=16)
+    ax.set_title(title, fontsize=16, pad=20)
     
     ax.set_xticks(np.arange(cols+1)-.5, minor=True)
     ax.set_yticks(np.arange(rows+1)-.5, minor=True)
     ax.grid(which="minor", color="black", linestyle='-', linewidth=2)
     ax.tick_params(which="minor", size=0)
-    
+    fig.tight_layout()
     return fig
 
 # --- Main App Logic ---
-
 st.set_page_config(layout="wide")
 st.title("🚢 Battleship AI Competition 🚢")
 
@@ -183,11 +183,14 @@ with st.sidebar:
 # --- Game Display Area ---
 st.header("Game Boards")
 col1, col2 = st.columns(2)
-board_placeholder_1 = col1.empty()
-board_placeholder_2 = col2.empty()
+with col1:
+    st.subheader("Player 1 Board")
+    board_placeholder_1 = st.empty()
+with col2:
+    st.subheader("Player 2 Board")
+    board_placeholder_2 = st.empty()
 status_placeholder = st.empty()
 log_placeholder = st.empty()
-
 
 if start_button:
     # --- Game Initialization ---
@@ -200,33 +203,37 @@ if start_button:
     player_1 = Player1AI("player_1", plate_shape, ship_schema)
     player_2 = Player2AI("player_2", plate_shape, ship_schema)
 
-    game = BattleshipGame(
-        player_1_ai=player_1,
-        player_2_ai=player_2,
-        plate_processor=st.session_state.processor,
-        robot=st.session_state.robot
-    )
+    game = BattleshipGame(player_1, player_2, st.session_state.processor, st.session_state.robot)
 
-    # --- Main Game Loop ---
-    status_placeholder.info("Game in progress...")
-    
+    # --- Live Game Loop ---
     # Initial board display
-    fig1 = plot_board(player_1.board_state, f"Player 1: {p1_ai_choice}")
-    board_placeholder_1.pyplot(fig1)
-    fig2 = plot_board(player_2.board_state, f"Player 2: {p2_ai_choice}")
-    board_placeholder_2.pyplot(fig2)
+    board_placeholder_1.pyplot(plot_board(player_1.board_state, f"Player 1: {p1_ai_choice}"))
+    board_placeholder_2.pyplot(plot_board(player_2.board_state, f"Player 2: {p2_ai_choice}"))
+    status_placeholder.info("Game starting...")
+    time.sleep(2) # Pause to show initial empty boards
 
-    # Run game by iterating through turns
-    game.run_game() # This will print to console; for live updates, it would need to be a generator
+    winner = None
+    for state in game.run_game_live():
+        # Update status message
+        status_text = f"**Turn {state['turn']}**: {state['active_player']} fires at **{state['move']}**... It's a **{state['result']}**!"
+        status_placeholder.markdown(status_text, unsafe_allow_html=True)
+        
+        # Update boards
+        board_placeholder_1.pyplot(plot_board(state['board_p1'], f"Player 1: {p1_ai_choice}"))
+        board_placeholder_2.pyplot(plot_board(state['board_p2'], f"Player 2: {p2_ai_choice}"))
+        
+        # Update history log
+        history_df = pd.DataFrame(state['history']).set_index('turn')
+        with log_placeholder.container():
+            st.write("--- Game Log ---")
+            st.dataframe(history_df, use_container_width=True)
+        
+        if state['winner']:
+            winner = state['winner']
+            break # Exit the loop once a winner is found
+            
+        time.sleep(1.0) # Pause between moves to make it watchable
 
-    # After game ends, update history and final board state
-    status_placeholder.success(f"Game Over! Final state shown below.")
-    
-    final_fig1 = plot_board(player_1.board_state, f"Player 1: {p1_ai_choice} (Final)")
-    board_placeholder_1.pyplot(final_fig1)
-    final_fig2 = plot_board(player_2.board_state, f"Player 2: {p2_ai_choice} (Final)")
-    board_placeholder_2.pyplot(final_fig2)
-    
-    st.header("Game History")
-    history_df = pd.DataFrame(game.history)
-    log_placeholder.dataframe(history_df, use_container_width=True)
+    if winner:
+        winner_name = p1_ai_choice if winner == 'player_1' else p2_ai_choice
+        status_placeholder.success(f"## 🎉 GAME OVER! {winner} ({winner_name}) wins! 🎉")
