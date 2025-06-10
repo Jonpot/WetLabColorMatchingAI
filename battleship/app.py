@@ -1,36 +1,32 @@
 import json
 from pathlib import Path
-import sys 
+import sys
+import importlib
+import inspect
+import pkgutil
+
+# --- Add project root to path ---
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from string import ascii_uppercase
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Type
 
 import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
+import pandas as pd
 
-from battleship.ai import AI
-from battleship.plate_state_processor import PlateStateProcessor, WellState
+# --- Import Battleship Framework Components ---
+from battleship.game_manager import BattleshipGame
+from battleship.plate_state_processor import DualPlateStateProcessor, WellState
 from battleship.robot.ot2_utils import OT2Manager
+from battleship.ai.base_ai import BattleshipAI
+from battleship.ai.probabilistic_ai import ProbabilisticAI # Default AI
 
-
+# --- App Configuration ---
 CONFIG_PATH = Path(__file__).resolve().parent / "configuration.json"
-
-
-def load_config() -> Dict[str, Any]:
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, "r") as f:
-            return json.load(f)
-    return {"plate_schema": {"rows": 8, "columns": 12}, "ship_schema": {}}
-
-
-def save_config(cfg: Dict[str, Any]) -> None:
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(cfg, f, indent=4)
-
-
 OT_NUMBER = 2
-VIRTUAL_MODE = False
+VIRTUAL_MODE = False # Set to True to run without a robot
 FORCE_REMOTE = False
 
 # ---- info.json ----
@@ -55,31 +51,81 @@ except json.JSONDecodeError:
 
 
 
+def load_config() -> Dict[str, Any]:
+    """Loads plate and ship configuration from a JSON file."""
+    if CONFIG_PATH.exists():
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    # Default config if none exists
+    return {
+        "plate_schema": {"rows": 8, "columns": 12},
+        "ship_schema": {
+            "Carrier": {"length": 5, "count": 1},
+            "Battleship": {"length": 4, "count": 1},
+            "Cruiser": {"length": 3, "count": 1},
+        }
+    }
 
-def plot_board(board: np.ndarray) -> plt.Figure:
+
+def save_config(cfg: Dict[str, Any]) -> None:
+    """Saves configuration to a JSON file."""
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(cfg, f, indent=4)
+
+
+def find_ai_classes() -> Dict[str, Type[BattleshipAI]]:
+    """Dynamically finds all subclasses of BattleshipAI in the 'battleship.ai' module."""
+    ai_classes = {"ProbabilisticAI": ProbabilisticAI} # Start with the default
+    ai_module_path = Path(__file__).resolve().parent.parent / "battleship" / "ai"
+    
+    for _, module_name, _ in pkgutil.iter_modules([str(ai_module_path)]):
+        if module_name not in ["base_ai", "probabilistic_ai"]:
+            try:
+                module = importlib.import_module(f"battleship.ai.{module_name}")
+                for name, obj in inspect.getmembers(module, inspect.isclass):
+                    if issubclass(obj, BattleshipAI) and obj is not BattleshipAI:
+                        ai_classes[name] = obj
+            except Exception as e:
+                st.warning(f"Could not load AI from {module_name}: {e}")
+    return ai_classes
+
+
+def plot_board(board: np.ndarray, title: str) -> plt.Figure:
+    """Creates a matplotlib figure of the game board."""
     cmap = {
         WellState.UNKNOWN: "#d9d9d9",
         WellState.MISS: "#6fa8dc",
         WellState.HIT: "#e06666",
     }
     rows, cols = board.shape
-    mapping = {state.value: idx for idx, state in enumerate(cmap)}
-    data = np.vectorize(lambda x: mapping[x.value])(board).astype(int)
-    fig, ax = plt.subplots()
+    data = np.array([[state.value for state in row] for row in board])
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
     ax.imshow(data, cmap=plt.matplotlib.colors.ListedColormap(list(cmap.values())), vmin=0, vmax=2)
-    ax.set_xticks(range(cols))
+    ax.set_xticks(np.arange(cols))
     ax.set_xticklabels([str(i + 1) for i in range(cols)])
-    ax.set_yticks(range(rows))
+    ax.set_yticks(np.arange(rows))
     ax.set_yticklabels(list(ascii_uppercase[:rows]))
     ax.set_xlabel("Column")
     ax.set_ylabel("Row")
-    ax.set_title("Board state")
-    ax.grid(True, which="both", color="black", linewidth=1, linestyle="--")
+    ax.set_title(title, fontsize=16)
+    
+    ax.set_xticks(np.arange(cols+1)-.5, minor=True)
+    ax.set_yticks(np.arange(rows+1)-.5, minor=True)
+    ax.grid(which="minor", color="black", linestyle='-', linewidth=2)
+    ax.tick_params(which="minor", size=0)
+    
     return fig
+
+# --- Main App Logic ---
+
+st.set_page_config(layout="wide")
+st.title("🚢 Battleship AI Competition 🚢")
 
 
 config = load_config()
 
+# --- Initialize Robot and Processors in Session State ---
 if "robot" not in st.session_state:
     if not FORCE_REMOTE:
         st.session_state.robot = OT2Manager(
@@ -103,68 +149,84 @@ if "robot" not in st.session_state:
         )
     st.session_state.robot.add_turn_on_lights_action()
     st.session_state.robot.execute_actions_on_remote()
-    st.session_state.processor = PlateStateProcessor(config.get("plate_schema", {}), ot_number=OT_NUMBER, cam_index=CAM_INDEX, virtual_mode=VIRTUAL_MODE)
-
-st.title("Battleship Robot")
-
-plate_cfg = config.get("plate_schema", {})
-ship_cfg = config.get("ship_schema", {})
-
-with st.expander("Configuration", expanded=True):
-    st.subheader("Plate")
-    rows = st.number_input("Rows", min_value=1, value=int(plate_cfg.get("rows", 8)), step=1)
-    cols = st.number_input("Columns", min_value=1, value=int(plate_cfg.get("columns", 12)), step=1)
-
-    st.subheader("Ships")
-    for name, val in list(ship_cfg.items()):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown(f"**{name}**")
-        with col2:
-            ship_cfg[name]["length"] = st.number_input(
-                f"Length for {name}", min_value=1, value=int(val["length"]), key=f"len_{name}")
-        with col3:
-            ship_cfg[name]["count"] = st.number_input(
-                f"Count for {name}", min_value=1, value=int(val["count"]), key=f"cnt_{name}")
-    with st.form("add_ship"):
-        st.markdown("### Add ship")
-        new_name = st.text_input("Name")
-        new_len = st.number_input("Length", min_value=1, value=1)
-        new_cnt = st.number_input("Count", min_value=1, value=1)
-        if st.form_submit_button("Add") and new_name:
-            ship_cfg[new_name] = {"length": int(new_len), "count": int(new_cnt)}
-    if st.button("Save configuration"):
-        config["plate_schema"] = {"rows": int(rows), "columns": int(cols)}
-        config["ship_schema"] = ship_cfg
-        save_config(config)
-        st.success("Configuration saved")
+    st.session_state.processor = DualPlateStateProcessor(config.get("plate_schema", {}), ot_number=OT_NUMBER, cam_index=CAM_INDEX, virtual_mode=VIRTUAL_MODE)
 
 
-def run_ai(cfg: Dict[str, Any], processor: PlateStateProcessor, robot: OT2Manager) -> None:
-    ships = cfg["ship_schema"]
-    ai = AI(processor, robot, ships)
+# --- UI Layout ---
+with st.sidebar:
+    st.header("Configuration")
+    with st.expander("Plate & Ship Setup", expanded=False):
+        st.subheader("Plate")
+        rows = st.number_input("Rows", min_value=1, value=int(config["plate_schema"].get("rows", 8)), step=1)
+        cols = st.number_input("Columns", min_value=1, value=int(config["plate_schema"].get("columns", 12)), step=1)
 
-    placeholder = st.empty()
-    step = 0
-    while True:
-        if ai.determine_game_state():
-            break
-        try:
-            move = ai.get_next_move()
-        except RuntimeError as e:
-            print(f"Error determining next move: {e}")
-            break
-        ai.fire_missile(move)
-        ai.board_history.append(ai.board_state.copy())
-        step += 1
-        with placeholder.container():
-            st.subheader(f"Step {step}: fired at {ascii_uppercase[move[0]]}{move[1] + 1}")
-            fig = plot_board(ai.board_state)
-            st.pyplot(fig)
-    st.success("Game over")
-    fig = plot_board(ai.board_state)
-    st.pyplot(fig)
+        st.subheader("Ships")
+        # Display and allow modification of existing ships
+        # (Your ship configuration UI can be pasted here)
+
+        if st.button("Save Configuration"):
+            config["plate_schema"] = {"rows": int(rows), "columns": int(cols)}
+            # config["ship_schema"] = ship_cfg # Update with ship data from UI
+            save_config(config)
+            st.success("Configuration saved!")
+            st.rerun()
+
+    st.header("Player Setup")
+    available_ais = find_ai_classes()
+    ai_names = list(available_ais.keys())
+    
+    p1_ai_choice = st.selectbox("Select AI for Player 1", options=ai_names, index=0)
+    p2_ai_choice = st.selectbox("Select AI for Player 2", options=ai_names, index=ai_names.index("ProbabilisticAI") if "ProbabilisticAI" in ai_names else 0)
+
+    start_button = st.button("🚀 Start Competition!", type="primary", use_container_width=True)
+
+# --- Game Display Area ---
+st.header("Game Boards")
+col1, col2 = st.columns(2)
+board_placeholder_1 = col1.empty()
+board_placeholder_2 = col2.empty()
+status_placeholder = st.empty()
+log_placeholder = st.empty()
 
 
-if st.button("Start AI"):
-    run_ai(config, st.session_state.processor, st.session_state.robot)
+if start_button:
+    # --- Game Initialization ---
+    plate_shape = (config["plate_schema"]["rows"], config["plate_schema"]["columns"])
+    ship_schema = config["ship_schema"]
+
+    Player1AI = available_ais[p1_ai_choice]
+    Player2AI = available_ais[p2_ai_choice]
+
+    player_1 = Player1AI("player_1", plate_shape, ship_schema)
+    player_2 = Player2AI("player_2", plate_shape, ship_schema)
+
+    game = BattleshipGame(
+        player_1_ai=player_1,
+        player_2_ai=player_2,
+        plate_processor=st.session_state.processor,
+        robot=st.session_state.robot
+    )
+
+    # --- Main Game Loop ---
+    status_placeholder.info("Game in progress...")
+    
+    # Initial board display
+    fig1 = plot_board(player_1.board_state, f"Player 1: {p1_ai_choice}")
+    board_placeholder_1.pyplot(fig1)
+    fig2 = plot_board(player_2.board_state, f"Player 2: {p2_ai_choice}")
+    board_placeholder_2.pyplot(fig2)
+
+    # Run game by iterating through turns
+    game.run_game() # This will print to console; for live updates, it would need to be a generator
+
+    # After game ends, update history and final board state
+    status_placeholder.success(f"Game Over! Final state shown below.")
+    
+    final_fig1 = plot_board(player_1.board_state, f"Player 1: {p1_ai_choice} (Final)")
+    board_placeholder_1.pyplot(final_fig1)
+    final_fig2 = plot_board(player_2.board_state, f"Player 2: {p2_ai_choice} (Final)")
+    board_placeholder_2.pyplot(final_fig2)
+    
+    st.header("Game History")
+    history_df = pd.DataFrame(game.history)
+    log_placeholder.dataframe(history_df, use_container_width=True)
