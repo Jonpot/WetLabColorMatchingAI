@@ -1,77 +1,47 @@
 #!/usr/bin/env python3
 # coding: utf-8
 """
-camera_color24.py  ―  24-patch ColorChecker calibration pipeline
+camera_color_baseline.py  —  Baseline Color Calibration Pipeline
 ================================================================
-* UI shows 24 draggable dots -x drop them onto the chart.
-* Supports 12 / 24 / 48 / 96 well plates (5 x 5 trimmed-mean sampling).
-* Saves / loads rectangle, plate corners, 24 dots, plate type, brightness,
-  contrast.
-* Learns a 3 x 10 **root-polynomial colour-correction matrix** each run.
-* Generates a diagnostic image:
-    ├ each well center:   left-half = raw,    right-half = corrected
-    └ each chart patch:   left-half = raw,    right-half = corrected,
-                          right-shifted solid circle = Macbeth reference
+* UI shows 4 draggable dots to define the plate's homography.
+* Supports 12 / 24 / 48 / 96 well plates.
+* Saves / loads plate corners, plate type, and baseline colors for consistent
+  lighting reads.
+* Generates a diagnostic image showing the raw color reads for each well.
 """
-# ssh -i C:\Users\shich\.ssh\ot2_ssh_key root@172.26.192.201  
+# ssh -i C:\Users\shich\.ssh\ot2_ssh_key root@172.26.192.201
 from __future__ import annotations
 import cv2, time, json, os, argparse
 import numpy as np
 from pathlib import Path
-import sys 
+import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 WIN = "Calibration"            # OpenCV window name
 
-# ───────────────────────────────── 24-patch Macbeth reference colours ─────
-MACBETH_24_BGR = [
-    ( 68,  82,115),(130,150,194),(157,122, 98),( 67,108, 87),
-    (177,128,133),(170,189,103),( 44,126,214),(166, 91, 80),
-    ( 99,  90,193),(108, 60, 94),( 64,188,157),( 46,163,224),
-    (150, 61, 56),( 73,148, 70),( 60, 54,175),( 31,199,231),
-    (149, 86,187),(161,133,  8),(242,243,242),(200,200,200),
-    (160,160,160),(121,122,122),( 85, 85, 85),( 52, 52, 52)]
-MACBETH_24_RGB = np.array([[b, g, r] for r, g, b in MACBETH_24_BGR],
-                          np.float32)            # shape (24, 3)
-
-# ─────────────────────────── sRGB ↔ linear helpers ────────────────────────
-def srgb2lin(s: np.ndarray) -> np.ndarray:
-    """8-bit sRGB → linear 0-1."""
-    s = s / 255.0
-    return np.where(s <= 0.04045, s / 12.92, ((s + 0.055) / 1.055) ** 2.4)
-
-def lin2srgb(l: np.ndarray) -> np.ndarray:
-    """linear 0-1 → 8-bit sRGB."""
-    l = np.clip(l, 0.0, 1.0)          # ← add this line
-    s = np.where(l <= 0.0031308,
-                 12.92 * l,
-                 1.055 * np.power(l, 1/2.4) - 0.055)
-    return np.clip(s * 255, 0, 255)
-
 # ═════════════════════════════ PlateProcessor ═════════════════════════════
 class PlateProcessor:
     """Camera plate processor.
 
-    Handles camera snapshot, UI calibration, colour correction, and diagnostic
-    image generation.  When ``virtual_mode`` is enabled no camera interaction
-    occurs and calls to :meth:`process_image` return an all white plate.  This
+    Handles camera snapshot, UI calibration for baseline colors, and diagnostic
+    image generation. When ``virtual_mode`` is enabled no camera interaction
+    occurs and calls to :meth:`process_image` return an all white plate. This
     mirrors the ``OT2Manager``'s virtual mode for easier testing.
     """
 
     def __init__(self, virtual_mode: bool = False) -> None:
         self.virtual_mode = virtual_mode
-        # four plate corners and 24 colour-chart points
-        self.pts:  list[tuple[int, int]] = []
-        self.cpts: list[tuple[int, int]] = []
+        # four plate corners
+        self.pts: list[tuple[int, int]] = []
 
         # UI state
-        self.drag_idx = self.drag_cidx = -1
+        self.drag_idx = -1
         self.img_copy: np.ndarray | None = None
         self.confirmed = False
         self.btnTL: tuple[int, int] | None = None
-        self.BW, self.BH = 140, 30             # confirm-button size
+        self.BW, self.BH = 140, 30          # confirm-button size
 
     # ───────────────────────────── camera snapshot ────────────────────────
     @staticmethod
@@ -82,14 +52,14 @@ class PlateProcessor:
         cap = cv2.VideoCapture(cam, cv2.CAP_DSHOW)
         if not cap.isOpened():
             raise RuntimeError("Camera open failed")
-        if res:                        # set resolution before warm-up
+        if res:                          # set resolution before warm-up
             w, h = res
             cap.set(3, w)
             cap.set(4, h)
             time.sleep(0.2)
 
         print("Warming up camera...")
-        for _ in range(warm):          # let exposure settle
+        for _ in range(warm):            # let exposure settle
             cap.read()
             time.sleep(0.04)
 
@@ -121,8 +91,8 @@ class PlateProcessor:
         Parameters
         ----------
         x1, y1, x2, y2:
-            Bounding rectangle of the plate.  Retained for backward
-            compatibility.  Ignored if ``quad`` is provided.
+            Bounding rectangle of the plate. Retained for backward
+            compatibility. Ignored if ``quad`` is provided.
         plate:
             Plate type ("12", "24", "48" or "96").
         quad:
@@ -143,7 +113,7 @@ class PlateProcessor:
             return grid
 
         src = np.array([[0, 0], [cols, 0], [cols, rows], [0, rows]],
-                        np.float32)
+                       np.float32)
         dst = np.array(quad, np.float32)
         H = cv2.getPerspectiveTransform(src, dst)
 
@@ -158,7 +128,7 @@ class PlateProcessor:
     # ─────────────────────── per-well trimmed-mean colour ─────────────────
     @staticmethod
     def avg_rgb(img: np.ndarray, centers: np.ndarray,
-                win: int = 11, trim: float = 0.1) -> list:
+              win: int = 11, trim: float = 0.1) -> list:
         """
         For each centre, take a `win`×`win` patch, drop upper/lower
         `trim` fraction, return RGB mean. Returns nested Python lists for
@@ -177,9 +147,9 @@ class PlateProcessor:
                 y1, y2 = max(0, y - half), min(h, y + half + 1)
                 patch = img[y1:y2, x1:x2].reshape(-1, 3).astype(np.float32)
 
-                if k_trim:                             # trimmed mean
+                if k_trim:                          # trimmed mean
                     patch = np.sort(patch, axis=0)[k_trim:-k_trim] \
-                            if patch.shape[0] > 2 * k_trim else patch
+                        if patch.shape[0] > 2 * k_trim else patch
                 rrow.append(patch.mean(axis=0)[::-1])  # BGR→RGB
             out.append(rrow)
         return out
@@ -242,32 +212,6 @@ class PlateProcessor:
             out.append(rrow)
         return out
 
-    # ───────────────────── root-polynomial colour correction ──────────────
-    # 10-term basis: R, G, B, √RG, √RB, √GB, R², G², B², 1
-    @staticmethod
-    def _poly_terms(lin: np.ndarray) -> np.ndarray:
-        r, g, b = lin.T
-        return np.stack([r, g, b,
-                         np.sqrt(r*g), np.sqrt(r*b), np.sqrt(g*b),
-                         r*r, g*g, b*b,
-                         np.ones_like(r)], axis=1)       # N × 10
-
-    @staticmethod
-    def fit_rpcc(meas_rgb8: np.ndarray,
-                 ref_rgb8: np.ndarray) -> np.ndarray:
-        """Return 3 × 10 root-polynomial CCM."""
-        X = PlateProcessor._poly_terms(srgb2lin(meas_rgb8))
-        Y = srgb2lin(ref_rgb8)             # N × 3
-        return Y.T @ np.linalg.pinv(X.T)   # 3 × 10
-
-    @staticmethod
-    def apply_rpcc(rgb8: np.ndarray, M10: np.ndarray) -> np.ndarray:
-        """Apply 3 × 10 CCM to an RGB array of any shape."""
-        lin = srgb2lin(rgb8.astype(np.float32).reshape(-1, 3))
-        corr_lin = (M10 @ PlateProcessor._poly_terms(lin).T).T
-        return lin2srgb(corr_lin).reshape(rgb8.shape) \
-                                 .clip(0, 255).astype(np.uint8)
-
     # ───────────────────────────── UI helpers ─────────────────────────────
     def draw_ui(self, disp: np.ndarray) -> np.ndarray:
         """Overlay instructions, rectangle, sample dots, confirm button."""
@@ -275,8 +219,8 @@ class PlateProcessor:
 
         # 1) instructions
         lines = ["Drag 4 plate corners",
-                 "Drag 24 coloured dots to chart",
-                 "Track-bar: plate type   (press 'c' to confirm, ESC to cancel)"]
+                 "Track-bar: plate type",
+                 "Press 'c' to confirm, ESC to cancel"]
         for i, txt in enumerate(lines):
             cv2.putText(disp, txt, (10, 30 + 30 * i),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
@@ -302,13 +246,7 @@ class PlateProcessor:
                                             quad=self.pts).reshape(-1, 2):
                 cv2.circle(disp, (int(cx), int(cy)), 4, (0, 0, 255), -1)
 
-        # 3) 24 chart dots
-        for i, pt in enumerate(self.cpts):
-            cv2.circle(disp, pt, 10, MACBETH_24_BGR[i], -1)
-            cv2.putText(disp, f"{i+1}", (pt[0] - 5, pt[1] + 20),
-                        cv2.FONT_HERSHEY_PLAIN, 1.1, (0, 0, 0), 2)
-
-        # 4) confirm button
+        # 3) confirm button
         self.btnTL = (w - self.BW - 10, h - self.BH - 10)
         bx, by = self.btnTL
         cv2.rectangle(disp, (bx, by), (bx + self.BW, by + self.BH),
@@ -335,11 +273,6 @@ class PlateProcessor:
                 if np.hypot(x - pt[0], y - pt[1]) < 12:
                     self.drag_idx = i
                     return
-            # colour dot?
-            for i, pt in enumerate(self.cpts):
-                if np.hypot(x - pt[0], y - pt[1]) < 12:
-                    self.drag_cidx = i
-                    return
 
         elif event == cv2.EVENT_MOUSEMOVE:
             h, w = self.img_copy.shape[:2]
@@ -347,13 +280,9 @@ class PlateProcessor:
                 self.pts[self.drag_idx] = (max(0, min(x, w - 1)),
                                            max(0, min(y, h - 1)))
                 self.update_win()
-            elif self.drag_cidx != -1:
-                self.cpts[self.drag_cidx] = (max(0, min(x, w - 1)),
-                                             max(0, min(y, h - 1)))
-                self.update_win()
 
         elif event == cv2.EVENT_LBUTTONUP:
-            self.drag_idx = self.drag_cidx = -1
+            self.drag_idx = -1
 
     # ----------------------------- calibration UI -------------------------
     def run_ui(self, img: np.ndarray,
@@ -377,14 +306,6 @@ class PlateProcessor:
             self.pts = [(mW, mH), (w - mW, mH),
                         (w - mW, h - mH), (mW, h - mH)]
 
-        # preset 24 dots
-        if prev and len(prev.get("calibration_dots", [])) == 24:
-            self.cpts = [tuple(map(int, p)) for p in prev["calibration_dots"]]
-        else:
-            gx = np.linspace(mW + 30, w - mW - 30, 6)
-            gy = np.linspace(mH + 30, h - mH - 30, 4)
-            self.cpts = [(int(x), int(y)) for y in gy for x in gx]
-
         self.confirmed = False
         cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(WIN, self.on_mouse)
@@ -406,7 +327,7 @@ class PlateProcessor:
             if self.confirmed:
                 break
 
-        if not self.confirmed:      # cancelled or timeout
+        if not self.confirmed:       # cancelled or timeout
             cv2.destroyWindow(WIN)
             return None
 
@@ -426,7 +347,6 @@ class PlateProcessor:
         return {
             "rectangle": rect,
             "plate_type": plate,
-            "calibration_dots": self.cpts,
             "corners": self.pts,
             "baseline_colors": baseline,
         }
@@ -437,7 +357,7 @@ class PlateProcessor:
                       calib: str = "camera/calibration.json",
                       force_ui: bool = False,
                       plate_type: str | None = None):
-        """Capture and return the corrected plate colours.
+        """Capture and return the baseline-corrected plate colours.
 
         In ``virtual_mode`` the camera is not accessed and a matrix of white
         wells is returned instead.
@@ -454,11 +374,8 @@ class PlateProcessor:
 
             plate = plate_type or (cfg.get("plate_type") if cfg else "96")
             rows, cols = {"12": (8, 12), "24": (4, 6), "48": (6, 8), "96": (8, 12)}.get(str(plate), (8, 12))
-            corr = np.full((rows, cols, 3), (255, 255, 255), dtype=np.float32)
-            corrected_matrix_file = "camera/corrected_matrix.json"
-            with open(corrected_matrix_file, "w") as f:
-                json.dump(corr.tolist(), f, indent=2)
-            return corr
+            # Return a white plate in virtual mode
+            return np.full((rows, cols, 3), 255.0, dtype=np.float32)
 
         self.snapshot(cam_index, snap)
 
@@ -473,14 +390,19 @@ class PlateProcessor:
             else:
                 cfg["plate_type"] = plate_type
 
-        if force_ui or cfg is None or plate_type:
-            cfg = self.run_ui(cv2.imread(snap), cfg, default_plate=cfg.get("plate_type", "96"))
+        if force_ui or cfg is None or plate_type or "baseline_colors" not in cfg:
+            img_for_ui = cv2.imread(snap)
+            if img_for_ui is None:
+                raise RuntimeError(f"Failed to read snapshot for UI: {snap}")
+            cfg = self.run_ui(img_for_ui, cfg, default_plate=(cfg or {}).get("plate_type", "96"))
             if cfg is None:
                 raise RuntimeError("Calibration cancelled")
             with open(calib, "w") as f:
                 json.dump(cfg, f, indent=2)
 
         img = cv2.imread(snap)
+        if img is None:
+            raise RuntimeError(f"Failed to read snapshot for processing: {snap}")
 
         # 1) sample well colours
         r = cfg["rectangle"]
@@ -489,10 +411,11 @@ class PlateProcessor:
                                     quad=cfg.get("corners"))
         raw = self.gaussian_cluster_rgb(img, centers)  # nested lists (rows × cols)
 
+        # 2) Apply baseline color correction for consistent lighting
         baseline = cfg.get("baseline_colors")
         if baseline is not None:
             # Compute the per-well difference from the average baseline and
-            # subtract that from the raw reading.  This avoids clipping
+            # subtract that from the raw reading. This avoids clipping
             # everything to blue when the baseline itself is quite bright.
             baseline_arr = np.array(baseline, np.float32)
             base_mean = baseline_arr.mean(axis=(0, 1), keepdims=True)
@@ -501,24 +424,11 @@ class PlateProcessor:
         else:
             raw_bs = np.array(raw, np.float32)
 
-        # 2) build RPCC from 24 patches
-        dots = np.asarray(cfg["calibration_dots"], int)
-        meas_raw = img[dots[:, 1], dots[:, 0], ::-1].astype(np.float32)  # N×3 RGB
-        M10 = self.fit_rpcc(meas_raw, MACBETH_24_RGB)
-        meas_corr = self.apply_rpcc(meas_raw, M10)
-        corr = self.apply_rpcc(raw_bs, M10)
-
         # Save raw matrix to a file
         raw_matrix_file = "camera/raw_matrix.json"
         with open(raw_matrix_file, "w") as f:
             json.dump(raw_bs.tolist(), f, indent=2)
         print(f"[Saved] Raw matrix to {raw_matrix_file}")
-
-        # Save corrected matrix to a file
-        corrected_matrix_file = "camera/corrected_matrix.json"
-        with open(corrected_matrix_file, "w") as f:
-            json.dump(corr.tolist(), f, indent=2)
-        print(f"[Saved] Corrected matrix to {corrected_matrix_file}")
 
         # 3) build diagnostic image
         alpha = cfg.get("contrast", 10) / 10.0
@@ -529,42 +439,23 @@ class PlateProcessor:
         marked = img.copy()
         RADIUS = 10
 
-        # (a) wells: half raw / half corrected
-        for ctr_row, raw_row, cor_row in zip(centers, disp_raw, corr):
-            for (cx, cy), rgb_r, rgb_c in zip(ctr_row, raw_row, cor_row):
-                cv2.circle(marked, (int(cx), int(cy)), RADIUS,
-                           tuple(int(v) for v in rgb_c[::-1]), -1)
+        # Draw left-half-circles for each well with the raw color
+        for ctr_row, raw_row in zip(centers, disp_raw):
+            for (cx, cy), rgb_r in zip(ctr_row, raw_row):
+                bgr_r = tuple(int(v) for v in rgb_r[::-1])
                 cv2.ellipse(marked, (int(cx), int(cy)), (RADIUS, RADIUS),
-                            0, 90, 270,
-                            tuple(int(v) for v in rgb_r[::-1]), -1)
+                            0, 90, 270, bgr_r, -1)
 
-        # (b) 24-patch dots: half raw / half corr + reference circle
-        SHIFT = RADIUS + 10
-        for i, ((x, y), rgb_r, rgb_c) in enumerate(zip(dots,
-                                                       meas_raw,
-                                                       meas_corr)):
-            centre = (int(x), int(y))
-            bgr_r  = tuple(int(v) for v in rgb_r[::-1]) #raw color
-            bgr_c  = tuple(int(v) for v in rgb_c[::-1]) #correction color
-            bgr_ref = MACBETH_24_BGR[i] #reference color
-
-            # half-circle
-            cv2.circle(marked, centre, RADIUS, bgr_c, -1)
-            cv2.ellipse(marked, centre, (RADIUS, RADIUS),
-                        0, 90, 270, bgr_r, -1)
-            # reference solid circle
-            cv2.circle(marked,
-                       (centre[0] + SHIFT, centre[1]),
-                       RADIUS, bgr_ref, -1)
-
-        cv2.imwrite("camera/output_with_centers_corr.jpg", marked)
-        print("[Saved] camera/output_with_centers_corr.jpg")
-        #return corr
+        # Save the diagnostic image
+        output_file = "camera/output_with_read_colors.jpg"
+        cv2.imwrite(output_file, marked)
+        print(f"[Saved] {output_file}")
+        
         return raw_bs
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Capture calibration data and generate colour-correction matrix")
+    parser = argparse.ArgumentParser(description="Capture calibration data and read plate colors.")
     parser.add_argument("--cam-index", type=int, default=2, help="Camera index")
     parser.add_argument("--force-ui", action="store_true", help="Always show calibration UI")
     parser.add_argument("--plate-type", choices=["12", "24", "48", "96"], help="Plate type/well count")
@@ -611,7 +502,7 @@ if __name__ == "__main__":
         robot.add_turn_on_lights_action()
         robot.execute_actions_on_remote()
 
-        corr = PlateProcessor().process_image(
+        plate_colors = PlateProcessor().process_image(
             cam_index=args.cam_index,
             force_ui=args.force_ui,
             plate_type=args.plate_type,
@@ -622,22 +513,11 @@ if __name__ == "__main__":
         robot.add_close_action()
         robot.execute_actions_on_remote()
     else:
-        corr = PlateProcessor().process_image(
+        plate_colors = PlateProcessor().process_image(
             cam_index=args.cam_index,
             force_ui=args.force_ui,
             plate_type=args.plate_type,
         )
-        
 
-    # Example for remote OT-2 usage
-    # from ot2_utils import OT2Manager
-    # robot = OT2Manager(hostname="172.26.192.201", username="root", key_filename="secret/ot2_ssh_key_remote", password=None)
-    # robot.add_turn_on_lights_action()
-    # robot.execute_actions_on_remote()
-    # robot.add_turn_off_lights_action()
-    # robot.add_close_action()
-    # robot.execute_actions_on_remote()
-    # print("First corrected RGB (row 0):", corr[0])
-
-# conda install -n myenv numpy scikit-learn scipy opencv paramiko scp -y
-# pip install numpy scikit-learn scipy opencv-python paramiko scp
+    print("Processing complete.")
+    print("First row of read RGB values:", plate_colors[0])
