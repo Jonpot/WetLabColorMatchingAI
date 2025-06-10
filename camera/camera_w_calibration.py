@@ -9,7 +9,7 @@ camera_color24.py  ―  24-patch ColorChecker calibration pipeline
   contrast.
 * Learns a 3 x 10 **root-polynomial colour-correction matrix** each run.
 * Generates a diagnostic image:
-    ├ each well centre:   left-half = raw,    right-half = corrected
+    ├ each well center:   left-half = raw,    right-half = corrected
     └ each chart patch:   left-half = raw,    right-half = corrected,
                           right-shifted solid circle = Macbeth reference
 """
