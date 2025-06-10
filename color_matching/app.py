@@ -220,6 +220,12 @@ if st.session_state[f"guesses_{row}"] == 0:
         disabled=st.session_state.ai_running,
     )
 
+reset_btn = st.button("Reset model knowledge", disabled=st.session_state.ai_running)
+restore_btn = st.button(
+    "Restore model knowledge",
+    disabled=st.session_state.ai_running,
+)
+
 # ——— ACTION ———
 if make_btn:
     guess_index = st.session_state[f"guesses_{row}"] + 1  # 1–11
@@ -279,6 +285,13 @@ if close_btn:
     except Exception as e:
         st.error(f"Robot error: {e}")
         st.stop()
+
+if reset_btn:
+    st.session_state.ai_optimizer.reset()
+    st.rerun()
+if restore_btn:
+    st.session_state.ai_optimizer.restore_permanent_data()
+    st.rerun()
 
 # ——— DISPLAY HISTORY ———
 if st.session_state[f"history_{row}"]:

@@ -52,18 +52,34 @@ class ColorLearningOptimizer:
         print(f"  Min required volume: {self.min_required_volume}")
         self.X_train: List[List[int]] = []
         self.Y_train: List[List[int]] = []
+
+        self.X_train_permanent: List[List[int]] = []
+        self.Y_train_permanent: List[List[int]] = []
     
     def reset(self):
-        if self.single_row_learning:
-            print("Resetting optimizer for single row learning.")
-            self.X_train: List[List[int]] = []
-            self.Y_train: List[List[int]] = []
+        print("Resetting optimizer for single row learning.")
+        self.X_train: List[List[int]] = []
+        self.Y_train: List[List[int]] = []
 
+    def restore_permanent_data(self):
+        """Restore the permanent training data."""
+        print("Restoring permanent training data.")
+        self.X_train = self.X_train_permanent.copy()
+        self.Y_train = self.Y_train_permanent.copy()
+        if len(self.X_train) >= 1:
+            X = np.array(self.X_train)
+            Y = np.array(self.Y_train)
+            for c, model in enumerate(self.models):
+                model.fit(X, Y[:, c])
+            print(f"Restored models with {len(self.X_train)} samples.")
+            print(f"Current training data: {self.X_train} -> {self.Y_train}")
 
     def add_data(self, volumes: list, measured_color: list) -> None:
         """Add an observed colour measurement."""
         self.X_train.append(volumes)
         self.Y_train.append(measured_color)
+        self.X_train_permanent.append(volumes)
+        self.Y_train_permanent.append(measured_color)
         if len(self.X_train) >= 1:
             X = np.array(self.X_train)
             Y = np.array(self.Y_train)
@@ -124,39 +140,44 @@ class ColorLearningOptimizer:
         return self._apply_min_volume_constraint(vols)
 
     def _apply_min_volume_constraint(self, volumes: list) -> list:
+        """
+        Applies two constraints to a list of continuous volumes:
+        1. Any volume > 0 must be >= min_required_volume.
+        2. The final integer volumes must sum to max_well_volume.
+        """
+        # 1. Apply the 'v == 0 or v >= min_required_volume' constraint
         adjusted = []
         for v in volumes:
-            if v == 0:
+            if self.min_required_volume/2 < v < self.min_required_volume:
+                # Snap small values to the minimum required volume
+                adjusted.append(self.min_required_volume)
+            elif 0 < v < self.min_required_volume/2:
                 adjusted.append(0)
-            elif v < self.min_required_volume:
-                if abs(v - 0) < abs(v - self.min_required_volume):
-                    adjusted.append(0)
-                else:
-                    adjusted.append(self.min_required_volume)
             else:
                 adjusted.append(v)
 
+        # 2. Normalize the volumes to sum to max_well_volume
         total_vol = sum(adjusted)
         if total_vol == 0:
-            # avoid infinite recursion when min_required_volume exceeds step
+            # Handle the edge case where all inputs were zero
             idx = random.randrange(self.dye_count)
-            adjusted[idx] = self.min_required_volume
-            total_vol = sum(adjusted)
+            adjusted[idx] = self.max_well_volume
+            return [int(v) for v in adjusted]
 
         scale = self.max_well_volume / total_vol
+        scaled_volumes = [v * scale for v in adjusted]
 
-        # convert scaled volumes to integer multiples of the step size
-        scaled = [v * scale for v in adjusted]
-        units = [int(round(val / self.step)) for val in scaled]
-        target_units = self.max_well_volume // self.step
-        diff_units = target_units - sum(units)
-        if diff_units != 0:
-            max_idx = np.argmax(units)
-            units[max_idx] += diff_units
+        # 3. Convert to integers and correct for rounding errors
+        final_volumes = [int(round(v)) for v in scaled_volumes]
+        
+        # Correct sum due to rounding
+        diff = self.max_well_volume - sum(final_volumes)
+        if diff != 0:
+            # Add the difference to the largest volume to minimize relative error
+            max_idx = np.argmax(final_volumes)
+            final_volumes[max_idx] += diff
 
-        adjusted = [u * self.step for u in units]
-
-        return adjusted
+        return final_volumes
 
     def _gp_optimize(self, target_rgb: list) -> list:
         """Suggest volumes by optimizing the Gaussian process model with multiple random restarts."""
