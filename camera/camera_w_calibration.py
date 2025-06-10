@@ -7,7 +7,8 @@ camera_color_baseline.py  —  Baseline Color Calibration Pipeline
 * Supports 12 / 24 / 48 / 96 well plates.
 * Saves / loads plate corners, plate type, and baseline colors for consistent
   lighting reads.
-* Generates a diagnostic image showing the raw color reads for each well.
+* Applies a brightness/saturation boost to the final read colors.
+* Generates a diagnostic image showing the final adjusted color reads for each well.
 """
 # ssh -i C:\Users\shich\.ssh\ot2_ssh_key root@172.26.192.201
 from __future__ import annotations
@@ -212,6 +213,48 @@ class PlateProcessor:
             out.append(rrow)
         return out
 
+    # ────────────────── Brightness/Saturation Adjustment ──────────────────
+    @staticmethod
+    def adjust_brightness_saturation(rgb_colors: np.ndarray,
+                                     brightness_factor: float = 1.1,
+                                     saturation_factor: float = 1.2) -> np.ndarray:
+        """
+        Adjusts the brightness and saturation of an array of RGB colors using
+        the HSV color space.
+        
+        Parameters
+        ----------
+        rgb_colors : np.ndarray
+            Input array of RGB colors with values in the 0-255 range.
+        brightness_factor : float
+            Factor to multiply the brightness (Value) by. >1 increases, <1 decreases.
+        saturation_factor : float
+            Factor to multiply the saturation by. >1 increases, <1 decreases.
+            
+        Returns
+        -------
+        np.ndarray
+            Array of adjusted RGB colors as float32.
+        """
+        # Convert to uint8 for HSV conversion, ensuring values are clipped
+        img_rgb_u8 = np.clip(rgb_colors, 0, 255).astype(np.uint8)
+        
+        # Convert RGB to HSV
+        img_hsv = cv2.cvtColor(img_rgb_u8, cv2.COLOR_RGB2HSV)
+        
+        h, s, v = cv2.split(img_hsv)
+        
+        # Apply factors to S and V channels, casting to float for multiplication
+        # to prevent overflow, then clipping and converting back to uint8.
+        s = np.clip(s.astype(np.float32) * saturation_factor, 0, 255).astype(np.uint8)
+        v = np.clip(v.astype(np.float32) * brightness_factor, 0, 255).astype(np.uint8)
+        
+        # Merge the channels and convert back to RGB
+        final_hsv = cv2.merge([h, s, v])
+        final_rgb = cv2.cvtColor(final_hsv, cv2.COLOR_HSV2RGB)
+        
+        return final_rgb.astype(np.float32)
+
     # ───────────────────────────── UI helpers ─────────────────────────────
     def draw_ui(self, disp: np.ndarray) -> np.ndarray:
         """Overlay instructions, rectangle, sample dots, confirm button."""
@@ -357,11 +400,7 @@ class PlateProcessor:
                       calib: str = "camera/calibration.json",
                       force_ui: bool = False,
                       plate_type: str | None = None):
-        """Capture and return the baseline-corrected plate colours.
-
-        In ``virtual_mode`` the camera is not accessed and a matrix of white
-        wells is returned instead.
-        """
+        """Capture and return the adjusted plate colours."""
 
         if self.virtual_mode:
             cfg = None
@@ -374,7 +413,6 @@ class PlateProcessor:
 
             plate = plate_type or (cfg.get("plate_type") if cfg else "96")
             rows, cols = {"12": (8, 12), "24": (4, 6), "48": (6, 8), "96": (8, 12)}.get(str(plate), (8, 12))
-            # Return a white plate in virtual mode
             return np.full((rows, cols, 3), 255.0, dtype=np.float32)
 
         self.snapshot(cam_index, snap)
@@ -390,7 +428,7 @@ class PlateProcessor:
             else:
                 cfg["plate_type"] = plate_type
 
-        if force_ui or cfg is None or plate_type or "baseline_colors" not in cfg:
+        if force_ui or cfg is None or "baseline_colors" not in cfg:
             img_for_ui = cv2.imread(snap)
             if img_for_ui is None:
                 raise RuntimeError(f"Failed to read snapshot for UI: {snap}")
@@ -404,19 +442,16 @@ class PlateProcessor:
         if img is None:
             raise RuntimeError(f"Failed to read snapshot for processing: {snap}")
 
-        # 1) sample well colours
+        # 1) Sample well colours
         r = cfg["rectangle"]
         centers = self.well_centers(r["x1"], r["y1"], r["x2"], r["y2"],
                                     cfg["plate_type"],
                                     quad=cfg.get("corners"))
-        raw = self.gaussian_cluster_rgb(img, centers)  # nested lists (rows × cols)
+        raw = self.gaussian_cluster_rgb(img, centers)
 
         # 2) Apply baseline color correction for consistent lighting
         baseline = cfg.get("baseline_colors")
         if baseline is not None:
-            # Compute the per-well difference from the average baseline and
-            # subtract that from the raw reading. This avoids clipping
-            # everything to blue when the baseline itself is quite bright.
             baseline_arr = np.array(baseline, np.float32)
             base_mean = baseline_arr.mean(axis=(0, 1), keepdims=True)
             diff = baseline_arr - base_mean
@@ -424,34 +459,35 @@ class PlateProcessor:
         else:
             raw_bs = np.array(raw, np.float32)
 
-        # Save raw matrix to a file
+        # 3) Apply brightness and saturation adjustment
+        adjusted_bs = self.adjust_brightness_saturation(raw_bs)
+
+        # Save adjusted matrix to a file
         raw_matrix_file = "camera/raw_matrix.json"
         with open(raw_matrix_file, "w") as f:
-            json.dump(raw_bs.tolist(), f, indent=2)
-        print(f"[Saved] Raw matrix to {raw_matrix_file}")
+            json.dump(adjusted_bs.tolist(), f, indent=2)
+        print(f"[Saved] Adjusted raw matrix to {raw_matrix_file}")
 
-        # 3) build diagnostic image
-        alpha = cfg.get("contrast", 10) / 10.0
-        beta  = cfg.get("brightness", 100) - 100
-        disp_raw = np.clip(np.array(raw) * alpha + beta,
-                           0, 255).astype(np.uint8)
+        # 4) Build diagnostic image
+        # The diagnostic image will show the final, adjusted colors.
+        disp_colors = np.clip(adjusted_bs, 0, 255).astype(np.uint8)
 
         marked = img.copy()
         RADIUS = 10
 
-        # Draw left-half-circles for each well with the raw color
-        for ctr_row, raw_row in zip(centers, disp_raw):
-            for (cx, cy), rgb_r in zip(ctr_row, raw_row):
-                bgr_r = tuple(int(v) for v in rgb_r[::-1])
+        # Draw left-half-circles for each well with the adjusted color
+        for ctr_row, color_row in zip(centers, disp_colors):
+            for (cx, cy), rgb_val in zip(ctr_row, color_row):
+                bgr_val = tuple(int(v) for v in rgb_val[::-1])
                 cv2.ellipse(marked, (int(cx), int(cy)), (RADIUS, RADIUS),
-                            0, 90, 270, bgr_r, -1)
+                            0, 90, 270, bgr_val, -1)
 
         # Save the diagnostic image
         output_file = "camera/output_with_read_colors.jpg"
         cv2.imwrite(output_file, marked)
         print(f"[Saved] {output_file}")
         
-        return raw_bs
+        return adjusted_bs
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════
 if __name__ == "__main__":

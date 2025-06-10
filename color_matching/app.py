@@ -37,7 +37,7 @@ VIRTUAL_MODE = False  # set to True for virtual mode
 
 OT_NUMBER = 4
 
-WHITE_THRESHOLD = 80  # RGB threshold for white detection
+WHITE_THRESHOLD = 100  # RGB threshold for white detection
 
 
 # Example available color slots
