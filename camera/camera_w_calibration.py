@@ -469,6 +469,8 @@ class PlateProcessor:
         return adjusted_bs
 
 # ═══════════════════════════════════ CLI ══════════════════════════════════
+# example usage: python ccamera/camera_w_calibration.py --force-ui --robot-number 4
+# otless example: python ccamera/camera_w_calibration.py --force-ui --cam-index 2 --plate-type 24
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Capture calibration data and read plate colors.")
     parser.add_argument("--cam-index", type=int, default=2, help="Camera index")
