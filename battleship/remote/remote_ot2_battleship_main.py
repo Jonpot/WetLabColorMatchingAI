@@ -245,19 +245,23 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
             raise WellFullError("Cannot add color to well; well is full.")
 
-        pick_up_tip(tip_ID="missile")
+        pick_up_tip(tip_ID=f"missile_{plate_idx}_{plate_well}")
         pipette.aspirate(volume, ammo)
         pipette.touch_tip(plate.labware[plate_well], v_offset=15, radius=0) # necessary to avoid crashing against the large adapter
         pipette.dispense(volume, plate.labware[plate_well].bottom(z=2.5))
+
+        # Quick mix
+        for _ in range(2):
+            pipette.aspirate(volume, plate.labware[plate_well].bottom(z=2.5))
+            pipette.dispense(volume, plate.labware[plate_well].bottom(z=2.5))
 
         plate.wells[plate_well].volume += volume
 
         # Blowout the remaining liquid in the pipette
         pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
-        return_tip(tip_ID="missile")
-
-        mix(plate_idx, plate_well, min(200,volume*2), 3)
+        #return_tip(tip_ID="missile") # don't return, this is a one-time use tip
+        pipette.drop_tip()
     
     def mix(
             plate_idx: int,
