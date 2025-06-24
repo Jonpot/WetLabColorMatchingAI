@@ -69,10 +69,11 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     def setup(plate_type: str = "corning_96_wellplate_360ul_flat",
               plate_1_slot: str = "1",
               plate_2_slot: str = "4",
-              ammo_slot: str = "2",
+              fluids_slot: str = "2",
               tiprack_slot: str = "3",
-              ocean_fluid_slot: str = "5",
-              ship_fluid_slot: str = "6",
+              ocean_fluid_well: str = "A1",
+              ship_fluid_well: str = "A2",
+              ammo_well: str = "A3",
               default_volume: int = 50) -> Tuple[protocol_api.Well, protocol_api.Well, protocol_api.Well,
                                                   Plate, Plate, protocol_api.InstrumentContext,
                                                   List[bool],
@@ -99,9 +100,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             protocol.comment(f"(The file had the following contents: {f.read()})")
             tiprack_state = [True] * 96
 
-        ammo = protocol.load_labware('nest_12_reservoir_15ml', location=ammo_slot)['A1']
-        ocean_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=ocean_fluid_slot)['A1']
-        ship_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=ship_fluid_slot)['A1']
+        ammo = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)[ammo_well]
+        ocean_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)[ocean_fluid_well]
+        ship_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)[ship_fluid_well]
 
         plate_1_labware = protocol.load_labware(plate_type, label="Battleship Plate", location=plate_1_slot)
         plate_1 = Plate(plate_1_labware, len(plate_1_labware.rows()), len(plate_1_labware.columns()), plate_1_labware.wells()[0].max_volume)
@@ -392,16 +393,26 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     
     plate_1_slot = data.get("plate_1_slot", "1")
     plate_2_slot = data.get("plate_2_slot", "4")
-    ammo_slot = data.get("ammo_slot", "2")
+    fluids_slot = data.get("fluids_slot", "2")
     tiprack_slot = data.get("tiprack_slot", "3")
-    ocean_fluid_slot = data.get("ocean_fluid_slot", "5")
-    ship_fluid_slot = data.get("ship_fluid_slot", "6")
+    
+    ocean_fluid_well = data.get("ocean_fluid_well", "A1")
+    ship_fluid_well = data.get("ship_fluid_well", "A2")
+    ammo_well = data.get("ammo_well", "A3")
     missile_volume = data.get("missile_volume", 50)
     default_volume = data.get("default_volume", 50)
     protocol.comment("Loading labware and instruments...")
-    ammo, ocean_fluid, ship_fluid, plate_1, plate_2, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, plate_1_slot, plate_2_slot, ammo_slot, tiprack_slot, ocean_fluid_slot, ship_fluid_slot, default_volume)
-    
-    
+    ammo, ocean_fluid, ship_fluid, plate_1, plate_2, pipette, tiprack_state, off_deck_tipracks = setup(plate_type,
+                                                                                                       plate_1_slot,
+                                                                                                       plate_2_slot,
+                                                                                                       fluids_slot,
+                                                                                                       tiprack_slot,
+                                                                                                       ocean_fluid_well,
+                                                                                                       ship_fluid_well,
+                                                                                                       ammo_well,
+                                                                                                       default_volume)
+
+
     protocol.comment("Ready")
     while run_flag:
         try:

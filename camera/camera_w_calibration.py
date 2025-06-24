@@ -473,7 +473,7 @@ class PlateProcessor:
 # otless example: python ccamera/camera_w_calibration.py --force-ui --cam-index 2 --plate-type 24
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Capture calibration data and read plate colors.")
-    parser.add_argument("--cam-index", type=int, default=2, help="Camera index")
+    parser.add_argument("--cam-index", type=int, default=None, help="Camera index")
     parser.add_argument("--force-ui", action="store_true", help="Always show calibration UI")
     parser.add_argument("--plate-type", choices=["12", "24", "48", "96"], help="Plate type/well count")
     parser.add_argument("--robot-number", type=int,
@@ -494,6 +494,10 @@ if __name__ == "__main__":
         local_pw = None if local_pw in (None, "None") else local_pw
         remote_ip = info.get("remote_ip")
         remote_pw = info.get("remote_password")
+
+        if args.cam_index is None:
+            args.cam_index = info.get("cam_index", 2)
+
         remote_pw = None if remote_pw in (None, "None") else remote_pw
         local_key = f"secret/OT_{args.robot_number}/ot2_ssh_key"
         remote_key = f"secret/OT_{args.robot_number}/ot2_ssh_key_remote"

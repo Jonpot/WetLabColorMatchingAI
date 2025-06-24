@@ -327,7 +327,7 @@ class DualPlateProcessor:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Capture calibration data and read plate colors.")
-    parser.add_argument("--cam-index", type=int, default=2, help="Camera index")
+    parser.add_argument("--cam-index", type=int, default=None, help="Camera index")
     parser.add_argument("--force-ui", action="store_true", help="Always show calibration UI")
     parser.add_argument("--plate-type", choices=["12", "24", "48", "96"], help="Plate type/well count")
     parser.add_argument("--robot-number", type=int,
@@ -351,6 +351,9 @@ if __name__ == "__main__":
         remote_pw = None if remote_pw in (None, "None") else remote_pw
         local_key = f"secret/OT_{args.robot_number}/ot2_ssh_key"
         remote_key = f"secret/OT_{args.robot_number}/ot2_ssh_key_remote"
+
+        if args.cam_index is None:
+            args.cam_index = info.get("cam_index", 2)
 
         from color_matching.robot.ot2_utils import OT2Manager
         try:
@@ -376,7 +379,7 @@ if __name__ == "__main__":
         plate_colors = DualPlateProcessor().process_image(
             cam_index=args.cam_index,
             force_ui=args.force_ui,
-            plate_type=args.plate_type,
+            plate_type_override=args.plate_type,
             calib=f"secret/OT_{args.robot_number}/dual_calibration.json"
         )
 
@@ -391,4 +394,5 @@ if __name__ == "__main__":
         )
 
     print("Processing complete.")
-    print("First row of read RGB values:", plate_colors[0])
+    print("First row of Plate1 read RGB values:", plate_colors['plate_1'][0])
+    print("Second row of Plate2 read RGB values:", plate_colors['plate_2'][0])

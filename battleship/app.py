@@ -29,9 +29,9 @@ from battleship.placement_utils import validate_placement_schema, coords_from_sc
 
 # --- App Configuration ---
 CONFIG_PATH = Path(__file__).resolve().parent / "configuration.json"
-OT_NUMBER = 2
+OT_NUMBER = 4
 VIRTUAL_MODE = False # Set to True to run without a robot
-FORCE_REMOTE = False
+FORCE_REMOTE = True
 
 # ---- info.json ----
 try:
