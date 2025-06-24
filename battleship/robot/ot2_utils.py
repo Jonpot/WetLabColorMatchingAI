@@ -61,6 +61,8 @@ class OT2Manager:
                  plate_slot: str = '1',
                  ammo_slot: str = '2',
                  tiprack_slot: str = '3',
+                 ocean_fluid_slot: str = '4',
+                 ship_fluid_slot: str = '5',
                  missile_volume: int = 100,
                  default_volume: int = 50,
                  virtual_mode: bool = False,
@@ -69,7 +71,16 @@ class OT2Manager:
         self.virtual_mode = virtual_mode
         self.last_error_type = None
         self.reduced_tips_info = reduced_tips_info
-        self.args = {"is_updated": False, "actions": [], "reduced_tips_info": self.reduced_tips_info, "plate_slot": plate_slot, "ammo_slot": ammo_slot, "tiprack_slot": tiprack_slot, "missile_volume": missile_volume, "default_volume": default_volume}
+        self.args = {"is_updated": False,
+                     "actions": [],
+                     "reduced_tips_info": self.reduced_tips_info,
+                     "plate_slot": plate_slot,
+                     "ammo_slot": ammo_slot,
+                     "tiprack_slot": tiprack_slot,
+                     "ocean_fluid_slot": ocean_fluid_slot,
+                     "ship_fluid_slot": ship_fluid_slot,
+                     "missile_volume": missile_volume,
+                     "default_volume": default_volume}
         self.finished_flag = False
         self.error_flag = False
         if not self.virtual_mode:

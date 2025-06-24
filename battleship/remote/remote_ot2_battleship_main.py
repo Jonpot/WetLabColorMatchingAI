@@ -70,16 +70,18 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
               plate_slot: str = "1",
               ammo_slot: str = "2",
               tiprack_slot: str = "3",
-              default_volume: int = 50) -> tuple[dict[str, protocol_api.Labware],
+              ocean_fluid_slot: str = "4",
+              ship_fluid_slot: str = "5",
+              default_volume: int = 50) -> Tuple[protocol_api.Well, protocol_api.Well, protocol_api.Well,
                                                   Plate, protocol_api.InstrumentContext,
-                                                  list[bool],
-                                                  list[protocol_api.Labware]]:
+                                                  List[bool],
+                                                  List[protocol_api.Labware]]:
         """
         Loads labware and instruments for the protocol.
 
         :param plate_type: The type of plate to use, as per the Opentrons API.
         """
-        tipracks: list[protocol_api.Labware] = [protocol.load_labware('opentrons_96_tiprack_300ul', location=tiprack_slot)]
+        tipracks: List[protocol_api.Labware] = [protocol.load_labware('opentrons_96_tiprack_300ul', location=tiprack_slot)]
 
         # Some tips may be missing, so we need to update the current state of the tip rack from
         # the file. This is necessary to avoid the robot trying to use tips that are not present.
@@ -87,7 +89,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         # Check ./tiprack_state.jsonx exists, if not make it and assume full rack
         try:
             with open(get_filename('tiprack_state.jsonx'), 'r') as f:
-                tiprack_state = json.load(f)
+                tiprack_state: List[bool] = json.load(f)
         except FileNotFoundError:
             protocol.comment(f"{get_filename('tiprack_state.jsonx')} not found. Assuming full rack.")
             tiprack_state = [True] * 96
@@ -97,6 +99,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             tiprack_state = [True] * 96
 
         ammo = protocol.load_labware('nest_12_reservoir_15ml', location=ammo_slot)['A1']
+        ocean_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=ocean_fluid_slot)['A1']
+        ship_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=ship_fluid_slot)['A1']
 
         plate_labware = protocol.load_labware(plate_type, label="Battleship Plate", location=plate_slot)
         plate = Plate(plate_labware, len(plate_labware.rows()), len(plate_labware.columns()), plate_labware.wells()[0].max_volume)
@@ -107,12 +111,12 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         pipette = protocol.load_instrument('p300_single_gen2', 'left', tip_racks=tipracks)
 
-        off_deck_tipracks = []
+        off_deck_tipracks: List[protocol_api.Labware] = []
         for _ in range(10): # arbitrarily high number of tip boxes
             # these tip boxes will be replaced as needed
             off_deck_tipracks.append(protocol.load_labware('opentrons_96_tiprack_300ul', location=protocol_api.OFF_DECK))
 
-        return ammo, plate, pipette, tiprack_state, off_deck_tipracks
+        return ammo, ocean_fluid, ship_fluid, plate, pipette, tiprack_state, off_deck_tipracks
 
     def pick_up_tip(tip_ID: str = None) -> None:
         """
@@ -345,10 +349,12 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     plate_slot = data.get("plate_slot", "1")
     ammo_slot = data.get("ammo_slot", "2")
     tiprack_slot = data.get("tiprack_slot", "3")
+    ocean_fluid_slot = data.get("ocean_fluid_slot", "4")
+    ship_fluid_slot = data.get("ship_fluid_slot", "5")
     missile_volume = data.get("missile_volume", 50)
     default_volume = data.get("default_volume", 50)
     protocol.comment("Loading labware and instruments...")
-    ammo, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, plate_slot, ammo_slot, tiprack_slot, default_volume)
+    ammo, ocean_fluid, ship_fluid, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, plate_slot, ammo_slot, tiprack_slot, ocean_fluid_slot, ship_fluid_slot, default_volume)
     
     
     protocol.comment("Ready")
