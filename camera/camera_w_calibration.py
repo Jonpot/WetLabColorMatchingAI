@@ -478,6 +478,8 @@ if __name__ == "__main__":
     parser.add_argument("--plate-type", choices=["12", "24", "48", "96"], help="Plate type/well count")
     parser.add_argument("--robot-number", type=int,
                         help="Load OT2 connection details from secret/OT_<num>/info.json")
+    parser.add_argument("--force-remote", type=bool, default=False,
+                        help="Force remote connection even if local connection is available")
     args = parser.parse_args()
 
     robot = None
@@ -504,7 +506,8 @@ if __name__ == "__main__":
 
         from color_matching.robot.ot2_utils import OT2Manager
         try:
-            raise NotImplementedError("temp bypass to force remote")
+            if args.force_remote:
+                raise RuntimeError("Forced remote connection")
             robot = OT2Manager(hostname=local_ip,
                                username="root",
                                password=local_pw,
