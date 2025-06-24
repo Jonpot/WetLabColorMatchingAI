@@ -67,13 +67,14 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         return output_file_destination_path
 
     def setup(plate_type: str = "corning_96_wellplate_360ul_flat",
-              plate_slot: str = "1",
+              plate_1_slot: str = "1",
+              plate_2_slot: str = "4",
               ammo_slot: str = "2",
               tiprack_slot: str = "3",
-              ocean_fluid_slot: str = "4",
-              ship_fluid_slot: str = "5",
+              ocean_fluid_slot: str = "5",
+              ship_fluid_slot: str = "6",
               default_volume: int = 50) -> Tuple[protocol_api.Well, protocol_api.Well, protocol_api.Well,
-                                                  Plate, protocol_api.InstrumentContext,
+                                                  Plate, Plate, protocol_api.InstrumentContext,
                                                   List[bool],
                                                   List[protocol_api.Labware]]:
         """
@@ -102,12 +103,11 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         ocean_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=ocean_fluid_slot)['A1']
         ship_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=ship_fluid_slot)['A1']
 
-        plate_labware = protocol.load_labware(plate_type, label="Battleship Plate", location=plate_slot)
-        plate = Plate(plate_labware, len(plate_labware.rows()), len(plate_labware.columns()), plate_labware.wells()[0].max_volume)
+        plate_1_labware = protocol.load_labware(plate_type, label="Battleship Plate", location=plate_1_slot)
+        plate_1 = Plate(plate_1_labware, len(plate_1_labware.rows()), len(plate_1_labware.columns()), plate_1_labware.wells()[0].max_volume)
 
-        for well in plate.wells.values():
-            # Initialize the well with its max volume
-            well.volume += default_volume
+        plate_2_labware = protocol.load_labware(plate_type, label="Battleship Plate 2", location=plate_2_slot)
+        plate_2 = Plate(plate_2_labware, len(plate_2_labware.rows()), len(plate_2_labware.columns()), plate_2_labware.wells()[0].max_volume)
 
         pipette = protocol.load_instrument('p300_single_gen2', 'left', tip_racks=tipracks)
 
@@ -116,7 +116,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             # these tip boxes will be replaced as needed
             off_deck_tipracks.append(protocol.load_labware('opentrons_96_tiprack_300ul', location=protocol_api.OFF_DECK))
 
-        return ammo, ocean_fluid, ship_fluid, plate, pipette, tiprack_state, off_deck_tipracks
+        return ammo, ocean_fluid, ship_fluid, plate_1, plate_2, pipette, tiprack_state, off_deck_tipracks
 
     def pick_up_tip(tip_ID: str = None) -> None:
         """
@@ -220,6 +220,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         protocol.comment("Tip rack refreshed.")
 
     def fire_missile(
+            plate_idx: int,
             plate_well: str,
             volume: float) -> None:
         """
@@ -231,6 +232,14 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         :raises ValueError: If the well is already full.
         """
         global tiprack_state, reduced_tips_info
+
+        if plate_idx not in [1, 2]:
+            raise ValueError("Invalid plate number. Must be 1 or 2.")
+        if plate_idx == 1:
+            plate = plate_1
+        elif plate_idx == 2:
+            plate = plate_2
+
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
             raise WellFullError("Cannot add color to well; well is full.")
 
@@ -246,9 +255,10 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         return_tip(tip_ID="missile")
 
-        mix(plate_well, min(200,volume*2), 3)
+        mix(plate_idx, plate_well, min(200,volume*2), 3)
     
     def mix(
+            plate_idx: int,
             plate_well: str | int,
             volume: float,
             repetitions: int) -> None:
@@ -260,6 +270,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         :param repetitions: The number of times to mix.
         """
         global tiprack_state, reduced_tips_info
+
+        if plate_idx not in [1, 2]:
+            raise ValueError("Invalid plate number. Must be 1 or 2.")
+        if plate_idx == 1:
+            plate = plate_1
+        elif plate_idx == 2:
+            plate = plate_2
 
         pick_up_tip("mix") # dedicated tip for mixing
 
@@ -283,12 +300,12 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         """
         global tiprack_state
         pick_up_tip()
-        pipette.touch_tip(plate.labware['A1'], radius=0)
-        pipette.move_to(plate.labware['A1'].bottom())
+        pipette.touch_tip(plate_1.labware['A1'], radius=0)
+        pipette.move_to(plate_1.labware['A1'].bottom())
         time.sleep(10)
         
-        pipette.touch_tip(plate.labware['H12'], radius=0)
-        pipette.move_to(plate.labware['H12'].bottom())
+        pipette.touch_tip(plate_1.labware['H12'], radius=0)
+        pipette.move_to(plate_1.labware['H12'].bottom())
         time.sleep(10)
         return_tip()
 
@@ -346,15 +363,16 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     except Exception as e:
         protocol.comment(f"Unexpected error: {e}. Assuming regular tip usage.")
     
-    plate_slot = data.get("plate_slot", "1")
+    plate_1_slot = data.get("plate_1_slot", "1")
+    plate_2_slot = data.get("plate_2_slot", "4")
     ammo_slot = data.get("ammo_slot", "2")
     tiprack_slot = data.get("tiprack_slot", "3")
-    ocean_fluid_slot = data.get("ocean_fluid_slot", "4")
-    ship_fluid_slot = data.get("ship_fluid_slot", "5")
+    ocean_fluid_slot = data.get("ocean_fluid_slot", "5")
+    ship_fluid_slot = data.get("ship_fluid_slot", "6")
     missile_volume = data.get("missile_volume", 50)
     default_volume = data.get("default_volume", 50)
     protocol.comment("Loading labware and instruments...")
-    ammo, ocean_fluid, ship_fluid, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, plate_slot, ammo_slot, tiprack_slot, ocean_fluid_slot, ship_fluid_slot, default_volume)
+    ammo, ocean_fluid, ship_fluid, plate_1, plate_2, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, plate_1_slot, plate_2_slot, ammo_slot, tiprack_slot, ocean_fluid_slot, ship_fluid_slot, default_volume)
     
     
     protocol.comment("Ready")
@@ -432,7 +450,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     refresh_tiprack()
                 elif subaction_name == "fire_missile":
                     try:
-                        fire_missile(subaction_args["plate_well"], missile_volume)
+                        fire_missile(subaction_args["plate_idx"], subaction_args["plate_well"], missile_volume)
                     except WellFullError as e:
                         return failed_to_run_actions(e)
                     except TiprackEmptyError as e:

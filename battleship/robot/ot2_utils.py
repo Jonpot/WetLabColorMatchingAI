@@ -58,11 +58,12 @@ class OT2Manager:
                  username: str,
                  password: str,
                  key_filename: str,
-                 plate_slot: str = '1',
+                 plate_1_slot: str = '1',
                  ammo_slot: str = '2',
                  tiprack_slot: str = '3',
-                 ocean_fluid_slot: str = '4',
-                 ship_fluid_slot: str = '5',
+                 plate_2_slot: str = '4',
+                 ocean_fluid_slot: str = '5',
+                 ship_fluid_slot: str = '6',
                  missile_volume: int = 100,
                  default_volume: int = 50,
                  virtual_mode: bool = False,
@@ -74,7 +75,8 @@ class OT2Manager:
         self.args = {"is_updated": False,
                      "actions": [],
                      "reduced_tips_info": self.reduced_tips_info,
-                     "plate_slot": plate_slot,
+                     "plate_1_slot": plate_1_slot,
+                     "plate_2_slot": plate_2_slot,
                      "ammo_slot": ammo_slot,
                      "tiprack_slot": tiprack_slot,
                      "ocean_fluid_slot": ocean_fluid_slot,
@@ -276,9 +278,9 @@ class OT2Manager:
         """Queue a refresh tip rack action."""
         self._add_action("refresh_tiprack")
 
-    def add_fire_missile_action(self, plate_well: str) -> None:
+    def add_fire_missile_action(self, plate_idx: int, plate_well: str) -> None:
         """Queue a fire missile action."""
-        self._add_action("fire_missile", {"plate_well": plate_well})
+        self._add_action("fire_missile", {"plate_idx": plate_idx, "plate_well": plate_well})
 
     def __del__(self) -> None:
         # Close the SSH connection when the object is deleted.
