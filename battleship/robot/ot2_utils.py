@@ -65,7 +65,7 @@ class OT2Manager:
                  ocean_fluid_well: str = 'A1',
                  ship_fluid_well: str = 'A2',
                  ammo_well: str = 'A3',
-                 missile_volume: int = 100,
+                 missile_volume: int = 50,
                  default_volume: int = 50,
                  virtual_mode: bool = False,
                  reduced_tips_info: None | int = 2,
