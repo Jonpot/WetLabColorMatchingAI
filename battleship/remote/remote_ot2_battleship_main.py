@@ -299,6 +299,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     def _place_liquid(
             liquid: protocol_api.Well,
+            liquid_name: str,
             plate_idx: int,
             wells: List[str]) -> None:
         """Helper to dispense liquid into many wells efficiently."""
@@ -306,7 +307,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             raise ValueError("Invalid plate number. Must be 1 or 2.")
         plate = plate_1 if plate_idx == 1 else plate_2
 
-        pick_up_tip("placement")
+        pick_up_tip(f"placement_{liquid_name}")
         remaining = 0
         for well in wells:
             if remaining < default_volume:
@@ -316,13 +317,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             remaining -= default_volume
             plate.wells[well].volume += default_volume
         pipette.blow_out(liquid.top())
-        return_tip("placement")
+        return_tip(f"placement_{liquid_name}")
 
     def place_water_in_wells(plate_idx: int, wells: List[str]) -> None:
-        _place_liquid(ocean_fluid, plate_idx, wells)
+        _place_liquid(ocean_fluid, "water", plate_idx, wells)
 
     def place_ships_in_wells(plate_idx: int, wells: List[str]) -> None:
-        _place_liquid(ship_fluid, plate_idx, wells)
+        _place_liquid(ship_fluid,"ship", plate_idx, wells)
 
 
 
