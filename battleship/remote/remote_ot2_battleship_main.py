@@ -90,15 +90,17 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         # Check ./tiprack_state.jsonx exists, if not make it and assume full rack
         try:
-            with open(get_filename('tiprack_state.jsonx'), 'r') as f:
-                tiprack_state: List[bool] = json.load(f)
+            with open(get_filename('dual_tiprack_state.jsonx'), 'r') as f:
+                dual_tiprack_state: Dict[str,List[bool]] = json.load(f)
         except FileNotFoundError:
-            protocol.comment(f"{get_filename('tiprack_state.jsonx')} not found. Assuming full rack.")
-            tiprack_state = [True] * 96
+            protocol.comment(f"{get_filename('dual_tiprack_state.jsonx')} not found. Assuming full rack.")
+            dual_tiprack_state["rack_1"] = [True] * 96
+            dual_tiprack_state["rack_2"] = [True] * 96
         except json.JSONDecodeError:
-            protocol.comment(f"{get_filename('tiprack_state.jsonx')} is not valid JSON. Assuming full rack.")
+            protocol.comment(f"{get_filename('dual_tiprack_state.jsonx')} is not valid JSON. Assuming full rack.")
             protocol.comment(f"(The file had the following contents: {f.read()})")
-            tiprack_state = [True] * 96
+            dual_tiprack_state["rack_1"] = [True] * 96
+            dual_tiprack_state["rack_2"] = [True] * 96
 
         fluids = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)
         ammo = fluids[ammo_well]
@@ -118,49 +120,52 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             # these tip boxes will be replaced as needed
             off_deck_tipracks.append(protocol.load_labware('opentrons_96_tiprack_300ul', location=protocol_api.OFF_DECK))
 
-        return ammo, ocean_fluid, ship_fluid, plate_1, plate_2, pipette, tiprack_state, off_deck_tipracks
+        return ammo, ocean_fluid, ship_fluid, plate_1, plate_2, pipette, dual_tiprack_state, off_deck_tipracks
 
     def pick_up_tip(tip_ID: str = None) -> None:
         """
         Picks up a tip from the tip rack.
         """
-        global tiprack_state, reduced_tips_info
+        global dual_tiprack_state, reduced_tips_info
 
         if reduced_tips_info is not None:
             if tip_ID not in reduced_tips_info:
                 try:
-                    tip_ID_well = tiprack_state.index(True)
+                    tip_ID_well = dual_tiprack_state["rack_1"].index(True)
+                    reduced_tips_info[tip_ID] = ("rack_1", tip_ID_well)
+                    protocol.comment(f"Using tip {tip_ID_well} in rack 1 for color slot {tip_ID}.")
+                    dual_tiprack_state["rack_1"][tip_ID_well] = False
                 except ValueError:
-                    raise TiprackEmptyError(f"No tips left in the tip rack to assign for {tip_ID}.")
-                reduced_tips_info[tip_ID] = tip_ID_well
-                protocol.comment(f"Using tip {tip_ID_well} for color slot {tip_ID}.")
-                tiprack_state[tip_ID_well] = False
+                    try:
+                        tip_ID_well = dual_tiprack_state["rack_2"].index(True)
+                        reduced_tips_info[tip_ID] = ("rack_2", tip_ID_well)
+                        protocol.comment(f"Using tip {tip_ID_well} in rack 2 for color slot {tip_ID}.")
+                        dual_tiprack_state["rack_2"][tip_ID_well] = False
+                    except ValueError:
+                        raise TiprackEmptyError(f"No tips left in the tip rack to assign for {tip_ID}.")
+                
+                
 
             # At this point, this color slot has a dedicated tip assigned to it.
             # Pick up this tip
-            protocol.comment(f"Picking up tip {reduced_tips_info[tip_ID]} for color slot {tip_ID}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID]]}")
-            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID]])
+            protocol.comment(f"Picking up tip {reduced_tips_info[tip_ID]} for color slot {tip_ID}. Exact arg: {pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID[0]][tip_ID[1]]]}")
+
+            pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[reduced_tips_info[tip_ID[0]][tip_ID[1]]])
             return
-            
 
         try:
-            next_well = tiprack_state.index(True)
+            next_well = dual_tiprack_state["rack_1"].index(True)
+            pipette.pick_up_tip(location=pipette.tip_racks[0].well(next_well))
+            dual_tiprack_state["rack_1"][next_well] = False
         except ValueError:
-            #protocol.comment("No tips left in the tip rack, switching to new rack.")
-            #on_deck_position = pipette.tip_racks[0].parent
-            #new_tiprack = off_deck_tipracks.pop()
-            #protocol.move_labware(labware=pipette.tip_racks[0], new_location=protocol_api.OFF_DECK)
-            #protocol.move_labware(labware=new_tiprack, new_location=on_deck_position)
-            #pipette.tip_racks[0] = new_tiprack
-            #next_well = 0
-            #tiprack_state = [True] * 96
+            try:
+                next_well = dual_tiprack_state["rack_2"].index(True)
+                pipette.pick_up_tip(location=pipette.tip_racks[1].well(next_well))
+                dual_tiprack_state["rack_2"][next_well] = False
+            except ValueError:
+                raise TiprackEmptyError("No tips left in the tip rack.")
 
-            # The above code only works via the OT2 Server GUI, not via the CLI.
-            # So we will just raise an error instead.
-            raise TiprackEmptyError("No tips left in the tip rack.")
-
-        pipette.pick_up_tip(location=pipette.tip_racks[0].well(next_well))
-        tiprack_state[next_well] = False
+        
 
     def return_tip(tip_ID: str = None) -> None:
         """
@@ -215,9 +220,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         """
         Resets the tip rack state to all tips available and resets pipette tracking.
         """
-        global tiprack_state
+        global dual_tiprack_state
         protocol.comment("Refreshing tip rack...")
-        tiprack_state = [True] * 96
+        dual_tiprack_state = [True] * 96
         pipette.reset_tipracks()
         protocol.comment("Tip rack refreshed.")
 
@@ -233,7 +238,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         :raises ValueError: If the well is already full.
         """
-        global tiprack_state, reduced_tips_info
+        global dual_tiprack_state, reduced_tips_info
 
         if plate_idx not in [1, 2]:
             raise ValueError("Invalid plate number. Must be 1 or 2.")
@@ -275,7 +280,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         :param volume: The volume to mix.
         :param repetitions: The number of times to mix.
         """
-        global tiprack_state, reduced_tips_info
+        global dual_tiprack_state, reduced_tips_info
 
         if plate_idx not in [1, 2]:
             raise ValueError("Invalid plate number. Must be 1 or 2.")
@@ -332,7 +337,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         Picks up a tip and moves it to A1 of the plate, pauses for 10 seconds,
         then moves it to H12 of the plate, pauses for 10 seconds, and then returns the tip.
         """
-        global tiprack_state
+        global dual_tiprack_state
         pick_up_tip()
         pipette.touch_tip(plate_1.labware['A1'], radius=0)
         pipette.move_to(plate_1.labware['A1'].bottom())
@@ -347,7 +352,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         """
         Closes the protocol, saving the state of the tip rack.
         """
-        global tiprack_state, run_flag, reduced_tips_info
+        global dual_tiprack_state, run_flag, reduced_tips_info
         if  protocol.is_simulating():
             # don't save tiprack state in simulation
             return
@@ -359,8 +364,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 pipette.pick_up_tip(location=pipette.tip_racks[0].wells()[tip])
                 pipette.drop_tip()
 
-        with open(get_filename('tiprack_state.jsonx'), 'w') as f:
-            json.dump(tiprack_state, fp=f)
+        with open(get_filename('dual_tiprack_state.jsonx'), 'w') as f:
+            json.dump(dual_tiprack_state, fp=f)
 
         run_flag = False
         protocol.comment("Protocol closed.")
@@ -369,7 +374,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     ### MAIN PROTOCOL ###
 
     plate_type = "corning_96_wellplate_360ul_flat"
-    global tiprack_state, run_flag, reduced_tips_info
+    global dual_tiprack_state, run_flag, reduced_tips_info
     reduced_tips_info = {}
     # Wait for the json to change
 
@@ -383,8 +388,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 n = data["reduced_tips_info"]
                 protocol.comment(f"Reduced tips info found. {n+1} tips will be used, 1 for each color and 1 for mixing.")
                 # ensure that n+1 tips are available in the tip rack state
-                if len([x for x in tiprack_state if x]) < n + 1:
-                    protocol.comment(f"Not enough tips available in the tip rack. {n+1} tips are needed, but only {len([x for x in tiprack_state if x])} are available.")
+                if len([x for x in dual_tiprack_state if x]) < n + 1:
+                    protocol.comment(f"Not enough tips available in the tip rack. {n+1} tips are needed, but only {len([x for x in dual_tiprack_state if x])} are available.")
                     raise TiprackEmptyError("Not enough tips available in the tip rack.")
                 reduced_tips_info = {}
 
@@ -408,7 +413,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     missile_volume = data.get("missile_volume", 50)
     default_volume = data.get("default_volume", 50)
     protocol.comment("Loading labware and instruments...")
-    ammo, ocean_fluid, ship_fluid, plate_1, plate_2, pipette, tiprack_state, off_deck_tipracks = setup(plate_type,
+    ammo, ocean_fluid, ship_fluid, plate_1, plate_2, pipette, dual_tiprack_state, off_deck_tipracks = setup(plate_type,
                                                                                                        plate_1_slot,
                                                                                                        plate_2_slot,
                                                                                                        fluids_slot,
