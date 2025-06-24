@@ -41,11 +41,11 @@ class BattleshipGame:
                 # 2. Fire the missile on the physical plate
                 well_name = f"{ascii_uppercase[move[0]]}{move[1] + 1}"
                 print(f"Turn {turn}, {player_id}: Firing at {well_name}...")
-                self.robot.add_fire_missile_action(plate_idx=1 if player_id == 'player_1' else 2, plate_well=well_name)
+                self.robot.add_fire_missile_action(plate_idx=2 if player_id == 'player_1' else 1, plate_well=well_name)
                 self.robot.execute_actions_on_remote()
 
                 # 3. Determine the result from the camera
-                result = self.plate_processor.determine_well_state(plate_id=1 if player_id == 'player_1' else 2, well=move)
+                result = self.plate_processor.determine_well_state(plate_id=2 if player_id == 'player_1' else 1, well=move)
                 print(f"Result: {result.name}!")
                 
                 # 4. Update the AI with the result and log history
