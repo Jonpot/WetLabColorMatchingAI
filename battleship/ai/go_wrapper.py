@@ -3,6 +3,8 @@ import os
 import subprocess
 import tempfile
 from typing import Tuple, Dict, Any
+import tkinter as tk
+from tkinter import filedialog
 
 from battleship.ai.base_ai import BattleshipAI
 from battleship.plate_state_processor import WellState
@@ -11,9 +13,13 @@ from battleship.plate_state_processor import WellState
 class GoWrapperAI(BattleshipAI):
     """A Battleship AI that delegates move selection to a Go executable."""
 
-    def __init__(self, player_id: str, board_shape: Tuple[int, int], ship_schema: Dict[str, Any], go_executable: str) -> None:
+    def __init__(self, player_id: str, board_shape: Tuple[int, int], ship_schema: Dict[str, Any]) -> None:
         super().__init__(player_id, board_shape, ship_schema)
-        self.go_executable = go_executable
+        # Open a file dialog to select the Go executable
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        self.go_executable = filedialog.askopenfilename(title="Select Go Executable")
+        root.destroy()
 
     def select_next_move(self) -> Tuple[int, int]:
         board = [[cell.value for cell in row] for row in self.board_state]
