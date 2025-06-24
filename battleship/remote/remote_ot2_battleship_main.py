@@ -67,8 +67,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         return output_file_destination_path
 
     def setup(plate_type: str = "corning_96_wellplate_360ul_flat",
-              plate_1_slot: str = "1",
-              plate_2_slot: str = "4",
+              plate_1_slot: str = "4",
+              plate_2_slot: str = "1",
               fluids_slot: str = "2",
               tiprack_slot: str = "3",
               ocean_fluid_well: str = "A1",
@@ -100,9 +100,10 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             protocol.comment(f"(The file had the following contents: {f.read()})")
             tiprack_state = [True] * 96
 
-        ammo = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)[ammo_well]
-        ocean_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)[ocean_fluid_well]
-        ship_fluid = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)[ship_fluid_well]
+        fluids = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)
+        ammo = fluids[ammo_well]
+        ocean_fluid = fluids[ocean_fluid_well]
+        ship_fluid = fluids[ship_fluid_well]
 
         plate_1_labware = protocol.load_labware(plate_type, label="Battleship Plate", location=plate_1_slot)
         plate_1 = Plate(plate_1_labware, len(plate_1_labware.rows()), len(plate_1_labware.columns()), plate_1_labware.wells()[0].max_volume)
@@ -305,8 +306,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         remaining = 0
         for well in wells:
             if remaining < default_volume:
-                pipette.aspirate(1000, liquid)
-                remaining = 1000
+                pipette.aspirate(pipette.max_volume, liquid)
+                remaining = pipette.max_volume
             pipette.dispense(default_volume, plate.labware[well].bottom(z=2.5))
             remaining -= default_volume
             plate.wells[well].volume += default_volume
@@ -391,8 +392,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     except Exception as e:
         protocol.comment(f"Unexpected error: {e}. Assuming regular tip usage.")
     
-    plate_1_slot = data.get("plate_1_slot", "1")
-    plate_2_slot = data.get("plate_2_slot", "4")
+    plate_1_slot = data.get("plate_1_slot", "4")
+    plate_2_slot = data.get("plate_2_slot", "1")
     fluids_slot = data.get("fluids_slot", "2")
     tiprack_slot = data.get("tiprack_slot", "3")
     

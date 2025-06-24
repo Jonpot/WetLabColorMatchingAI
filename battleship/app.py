@@ -171,7 +171,7 @@ st.title("🚢 Battleship AI Competition 🚢")
 
 config = load_config()
 plate_shape = (config["plate_schema"].get("rows", 8), config["plate_schema"].get("columns", 12))
-ship_schema = config["ship_schema"]
+ship_schema = config.get("ship_schema", {})
 
 # --- Initialize Robot and Processors in Session State ---
 if "robot" not in st.session_state:
@@ -212,12 +212,51 @@ with st.sidebar:
         cols = st.number_input("Columns", min_value=1, value=int(config["plate_schema"].get("columns", 12)), step=1)
 
         st.subheader("Ships")
-        # Display and allow modification of existing ships
-        # (Your ship configuration UI can be pasted here)
+
+        ship_types = list(ship_schema.keys())
+        ships_to_delete = []
+
+        # Display each ship in its own row with columns for length, count, and delete
+        for ship in ship_types:
+            disp_cols = st.columns([2, 2, 1, 1])
+            with disp_cols[0]:
+                st.markdown(f"**{ship}**")
+            with disp_cols[1]:
+                length = st.number_input(f"{ship} Length", min_value=1, value=ship_schema[ship]["length"], step=1, key=f"length_{ship}")
+            with disp_cols[2]:
+                count = st.number_input(f"{ship} Count", min_value=1, value=ship_schema[ship]["count"], step=1, key=f"count_{ship}")
+            with disp_cols[3]:
+                if st.button(f"🗑️", key=f"delete_{ship}"):
+                    ships_to_delete.append(ship)
+            ship_schema[ship] = {"length": length, "count": count}
+
+        for ship in ships_to_delete:
+            del ship_schema[ship]
+            config["ship_schema"] = ship_schema
+            save_config(config)
+            st.rerun()  # Refresh the page to update UI
+
+        # Add new ship section (not inside expander)
+        st.markdown("---")
+        st.markdown("**Add New Ship**")
+        new_ship = st.text_input("New Ship Name", "")
+        if new_ship and new_ship not in ship_types:
+            new_length = st.number_input(f"{new_ship} Length", min_value=1, value=3, step=1, key=f"length_{new_ship}")
+            new_count = st.number_input(f"{new_ship} Count", min_value=1, value=1, step=1, key=f"count_{new_ship}")
+            if st.button("Add Ship", key="add_ship"):
+                ship_schema[new_ship] = {"length": new_length, "count": new_count}
+                config["ship_schema"] = ship_schema 
+                save_config(config)
+                st.success(f"Added {new_ship} with length {new_length} and count {new_count}")
+                st.rerun()  #
+
+        st.write("Current Ship Configuration:")
+        st.json(ship_schema)
 
         if st.button("Save Configuration"):
             config["plate_schema"] = {"rows": int(rows), "columns": int(cols)}
-            # config["ship_schema"] = ship_cfg # Update with ship data from UI
+            config["ship_schema"] = ship_schema  # Update with ship data from UI
+            print("Saving configuration:", config)
             save_config(config)
             st.success("Configuration saved!")
             st.rerun()

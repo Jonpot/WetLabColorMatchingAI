@@ -1,1 +1,1 @@
-{"is_updated": false, "actions": [], "reduced_tips_info": 2, "plate_1_slot": "1", "plate_2_slot": "4", "tiprack_slot": "3", "fluids_slot": "2", "ocean_fluid_well": "A1", "ship_fluid_well": "A2", "ammo_well": "A3", "missile_volume": 100, "default_volume": 50}
+{"is_updated": true, "actions": [{"fire_missile": {"plate_idx": 1, "plate_well": "D7"}}], "reduced_tips_info": 2, "plate_1_slot": "1", "plate_2_slot": "4", "tiprack_slot": "3", "fluids_slot": "2", "ocean_fluid_well": "A1", "ship_fluid_well": "A2", "ammo_well": "A3", "missile_volume": 100, "default_volume": 50}

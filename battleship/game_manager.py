@@ -45,7 +45,7 @@ class BattleshipGame:
                 self.robot.execute_actions_on_remote()
 
                 # 3. Determine the result from the camera
-                result = self.plate_processor.determine_well_state(plate_id=player_id, well=move)
+                result = self.plate_processor.determine_well_state(plate_id=1 if player_id == 'player_1' else 2, well=move)
                 print(f"Result: {result.name}!")
                 
                 # 4. Update the AI with the result and log history
