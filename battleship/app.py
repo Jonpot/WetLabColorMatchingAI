@@ -170,7 +170,11 @@ st.title("🚢 Battleship AI Competition 🚢")
 
 
 config = load_config()
-plate_shape = (config["plate_schema"].get("rows", 8), config["plate_schema"].get("columns", 12))
+plate_shape_full = (
+    config["plate_schema"].get("rows", 8),
+    config["plate_schema"].get("columns", 12),
+)
+game_shape = (plate_shape_full[0], plate_shape_full[1] - 1)
 ship_schema = config.get("ship_schema", {})
 
 # --- Initialize Robot and Processors in Session State ---
@@ -275,29 +279,36 @@ with st.sidebar:
             placement = None
             for _ in range(5):
                 try:
-                    cand = ai_cls(plate_shape, ship_schema).generate_placement()
+                    cand = ai_cls(game_shape, ship_schema).generate_placement()
                 except Exception:
                     cand = None
-                if cand and validate_placement_schema(cand, plate_shape, ship_schema):
+                if cand and validate_placement_schema(cand, game_shape, ship_schema):
                     placement = cand
                     break
             if placement is None:
-                placement = NaivePlacementAI(plate_shape, ship_schema).generate_placement()
+                placement = NaivePlacementAI(game_shape, ship_schema).generate_placement()
             st.session_state.placement[plate_id] = placement
         if st.session_state.placement[plate_id] is not None:
-            st.pyplot(plot_ship_placement(plate_shape, st.session_state.placement[plate_id]))
+            st.pyplot(plot_ship_placement(game_shape, st.session_state.placement[plate_id]))
             if st.button("Rerun placement AI", key=f"rerun_{plate_id}"):
                 st.session_state.placement[plate_id] = None
             if not st.session_state.liquids_placed[plate_id]:
                 if st.button("Confirm and place liquids", key=f"confirm_{plate_id}"):
                     placement = st.session_state.placement[plate_id]
                     ship_cells = coords_from_schema(placement)
-                    all_cells = [(r, c) for r in range(plate_shape[0]) for c in range(plate_shape[1])]
+                    all_cells = [(r, c) for r in range(game_shape[0]) for c in range(game_shape[1])]
                     ocean_cells = [c for c in all_cells if c not in ship_cells]
                     ship_wells = [f"{ascii_uppercase[r]}{c+1}" for r, c in ship_cells]
                     ocean_wells = [f"{ascii_uppercase[r]}{c+1}" for r, c in ocean_cells]
-                    st.session_state.robot.add_place_water_action(plate_id, ocean_wells)
-                    st.session_state.robot.add_place_ships_action(plate_id, ship_wells)
+
+                    calib_miss = [f"{ascii_uppercase[r]}{plate_shape_full[1]}" for r in range(4)]
+                    calib_hit = [f"{ascii_uppercase[r]}{plate_shape_full[1]}" for r in range(4, 8)]
+
+                    st.session_state.robot.add_place_water_action(plate_id, ocean_wells + calib_miss)
+                    st.session_state.robot.add_place_ships_action(plate_id, ship_wells + calib_hit)
+                    for well in calib_miss + calib_hit:
+                        st.session_state.robot.add_fire_missile_action(plate_id, well)
+
                     st.session_state.robot.execute_actions_on_remote()
                     st.session_state.liquids_placed[plate_id] = True
         st.session_state.game_ai_choice[plate_id] = st.selectbox("Select gameplay AI", options=game_ai_names, key=f"game_ai_{plate_id}")
@@ -323,8 +334,8 @@ if start_button:
     p1_ai_choice = st.session_state.game_ai_choice[1]
     p2_ai_choice = st.session_state.game_ai_choice[2]
 
-    player_1 = Player1AI("player_1", plate_shape, ship_schema)
-    player_2 = Player2AI("player_2", plate_shape, ship_schema)
+    player_1 = Player1AI("player_1", game_shape, ship_schema)
+    player_2 = Player2AI("player_2", game_shape, ship_schema)
 
     game = BattleshipGame(player_1, player_2, st.session_state.processor, st.session_state.robot)
 
