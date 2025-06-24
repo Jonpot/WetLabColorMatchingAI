@@ -291,6 +291,33 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         return_tip("mix")
 
+    def _place_liquid(
+            liquid: protocol_api.Well,
+            plate_idx: int,
+            wells: List[str]) -> None:
+        """Helper to dispense liquid into many wells efficiently."""
+        if plate_idx not in [1, 2]:
+            raise ValueError("Invalid plate number. Must be 1 or 2.")
+        plate = plate_1 if plate_idx == 1 else plate_2
+
+        pick_up_tip("placement")
+        remaining = 0
+        for well in wells:
+            if remaining < default_volume:
+                pipette.aspirate(1000, liquid)
+                remaining = 1000
+            pipette.dispense(default_volume, plate.labware[well].bottom(z=2.5))
+            remaining -= default_volume
+            plate.wells[well].volume += default_volume
+        pipette.blow_out(liquid.top())
+        return_tip("placement")
+
+    def place_water_in_wells(plate_idx: int, wells: List[str]) -> None:
+        _place_liquid(ocean_fluid, plate_idx, wells)
+
+    def place_ships_in_wells(plate_idx: int, wells: List[str]) -> None:
+        _place_liquid(ship_fluid, plate_idx, wells)
+
 
 
     def calibrate_96_well_plate() -> None:
@@ -455,6 +482,10 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                         return failed_to_run_actions(e)
                     except TiprackEmptyError as e:
                         return failed_to_run_actions(e)
+                elif subaction_name == "place_water_in_wells":
+                    place_water_in_wells(subaction_args["plate_idx"], subaction_args["wells"])
+                elif subaction_name == "place_ships_in_wells":
+                    place_ships_in_wells(subaction_args["plate_idx"], subaction_args["wells"])
                 elif subaction_name == "calibrate_96_well_plate":
                     calibrate_96_well_plate()
                 elif subaction_name == "close":
