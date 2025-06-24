@@ -10,7 +10,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from string import ascii_uppercase
-from typing import Any, Dict, List, Type
+from typing import Any, Dict, List, Type, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,7 +22,10 @@ from battleship.game_manager import BattleshipGame
 from battleship.plate_state_processor import DualPlateStateProcessor, WellState
 from battleship.robot.ot2_utils import OT2Manager
 from battleship.ai.base_ai import BattleshipAI
-from battleship.ai.probabilistic_ai import ProbabilisticAI # Default AI
+from battleship.ai.probabilistic_ai import ProbabilisticAI  # Default AI
+from battleship.placement_ai import PlacementAI, NaivePlacementAI
+from battleship import placement_ai
+from battleship.placement_utils import validate_placement_schema, coords_from_schema
 
 # --- App Configuration ---
 CONFIG_PATH = Path(__file__).resolve().parent / "configuration.json"
@@ -91,6 +94,23 @@ def find_ai_classes() -> Dict[str, Type[BattleshipAI]]:
     return ai_classes
 
 
+def find_placement_ai_classes() -> Dict[str, Type[PlacementAI]]:
+    classes: Dict[str, Type[PlacementAI]] = {"NaivePlacementAI": NaivePlacementAI}
+    module_path = Path(__file__).resolve().parent.parent / "battleship" / "placement_ai"
+    for _, module_name, _ in pkgutil.iter_modules([str(module_path)]):
+        if module_name not in ["base_placement_ai", "naive_placement_ai", "__init__", "random_placement_ai"]:
+            try:
+                module = importlib.import_module(f"battleship.placement_ai.{module_name}")
+                for name, obj in inspect.getmembers(module, inspect.isclass):
+                    if issubclass(obj, PlacementAI) and obj is not PlacementAI:
+                        classes[name] = obj
+            except Exception as e:
+                st.warning(f"Could not load Placement AI from {module_name}: {e}")
+    # ensure RandomPlacementAI is included from package init
+    classes.setdefault("RandomPlacementAI", placement_ai.RandomPlacementAI)
+    return classes
+
+
 def plot_board(board: np.ndarray, title: str) -> plt.Figure:
     """Creates a matplotlib figure of the game board."""
     cmap = {
@@ -118,12 +138,40 @@ def plot_board(board: np.ndarray, title: str) -> plt.Figure:
     fig.tight_layout()
     return fig
 
+
+def plot_ship_placement(board_shape: Tuple[int, int], placement: List[Dict[str, Any]]) -> plt.Figure:
+    rows, cols = board_shape
+    board = np.zeros(board_shape)
+    for item in placement:
+        r, c, l = item['row'], item['col'], item['length']
+        if item['direction'] == 'horizontal':
+            board[r, c:c+l] = 1
+        else:
+            board[r:r+l, c] = 1
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.imshow(board, cmap=plt.cm.Blues, vmin=0, vmax=1)
+    ax.set_xticks(np.arange(cols))
+    ax.set_xticklabels([str(i + 1) for i in range(cols)])
+    ax.set_yticks(np.arange(rows))
+    ax.set_yticklabels(list(ascii_uppercase[:rows]))
+    ax.set_xlabel("Column")
+    ax.set_ylabel("Row")
+    ax.set_title("Ship Placement", fontsize=16, pad=20)
+    ax.set_xticks(np.arange(cols+1)-.5, minor=True)
+    ax.set_yticks(np.arange(rows+1)-.5, minor=True)
+    ax.grid(which="minor", color="black", linestyle='-', linewidth=2)
+    ax.tick_params(which="minor", size=0)
+    fig.tight_layout()
+    return fig
+
 # --- Main App Logic ---
 st.set_page_config(layout="wide")
 st.title("🚢 Battleship AI Competition 🚢")
 
 
 config = load_config()
+plate_shape = (config["plate_schema"].get("rows", 8), config["plate_schema"].get("columns", 12))
+ship_schema = config["ship_schema"]
 
 # --- Initialize Robot and Processors in Session State ---
 if "robot" not in st.session_state:
@@ -150,6 +198,9 @@ if "robot" not in st.session_state:
     st.session_state.robot.add_turn_on_lights_action()
     st.session_state.robot.execute_actions_on_remote()
     st.session_state.processor = DualPlateStateProcessor(config.get("plate_schema", {}), ot_number=OT_NUMBER, cam_index=CAM_INDEX, virtual_mode=VIRTUAL_MODE)
+    st.session_state.placement = {1: None, 2: None}
+    st.session_state.liquids_placed = {1: False, 2: False}
+    st.session_state.game_ai_choice = {1: None, 2: None}
 
 
 # --- UI Layout ---
@@ -171,14 +222,49 @@ with st.sidebar:
             st.success("Configuration saved!")
             st.rerun()
 
-    st.header("Player Setup")
-    available_ais = find_ai_classes()
-    ai_names = list(available_ais.keys())
-    
-    p1_ai_choice = st.selectbox("Select AI for Player 1", options=ai_names, index=0)
-    p2_ai_choice = st.selectbox("Select AI for Player 2", options=ai_names, index=ai_names.index("ProbabilisticAI") if "ProbabilisticAI" in ai_names else 0)
+    st.header("Plate Setup")
+    placement_classes = find_placement_ai_classes()
+    placement_names = list(placement_classes.keys())
+    game_ai_classes = find_ai_classes()
+    game_ai_names = list(game_ai_classes.keys())
 
-    start_button = st.button("🚀 Start Competition!", type="primary", use_container_width=True)
+    for plate_id in [1, 2]:
+        st.subheader(f"Plate {plate_id}")
+        place_choice = st.selectbox("Select Placement AI", options=placement_names, key=f"place_ai_{plate_id}")
+        if st.button("Run placement AI", key=f"run_place_{plate_id}"):
+            ai_cls = placement_classes[place_choice]
+            placement = None
+            for _ in range(5):
+                try:
+                    cand = ai_cls(plate_shape, ship_schema).generate_placement()
+                except Exception:
+                    cand = None
+                if cand and validate_placement_schema(cand, plate_shape, ship_schema):
+                    placement = cand
+                    break
+            if placement is None:
+                placement = NaivePlacementAI(plate_shape, ship_schema).generate_placement()
+            st.session_state.placement[plate_id] = placement
+        if st.session_state.placement[plate_id] is not None:
+            st.pyplot(plot_ship_placement(plate_shape, st.session_state.placement[plate_id]))
+            if st.button("Rerun placement AI", key=f"rerun_{plate_id}"):
+                st.session_state.placement[plate_id] = None
+            if not st.session_state.liquids_placed[plate_id]:
+                if st.button("Confirm and place liquids", key=f"confirm_{plate_id}"):
+                    placement = st.session_state.placement[plate_id]
+                    ship_cells = coords_from_schema(placement)
+                    all_cells = [(r, c) for r in range(plate_shape[0]) for c in range(plate_shape[1])]
+                    ocean_cells = [c for c in all_cells if c not in ship_cells]
+                    ship_wells = [f"{ascii_uppercase[r]}{c+1}" for r, c in ship_cells]
+                    ocean_wells = [f"{ascii_uppercase[r]}{c+1}" for r, c in ocean_cells]
+                    st.session_state.robot.add_place_water_action(plate_id, ocean_wells)
+                    st.session_state.robot.add_place_ships_action(plate_id, ship_wells)
+                    st.session_state.robot.execute_actions_on_remote()
+                    st.session_state.liquids_placed[plate_id] = True
+        st.session_state.game_ai_choice[plate_id] = st.selectbox("Select gameplay AI", options=game_ai_names, key=f"game_ai_{plate_id}")
+
+    ready = all(st.session_state.liquids_placed.values()) and all(st.session_state.game_ai_choice.values())
+    start_button = st.button("🚀 Start Game", type="primary", use_container_width=True, disabled=not ready)
 
 # --- Game Display Area ---
 st.header("Game Boards")
@@ -193,12 +279,10 @@ status_placeholder = st.empty()
 log_placeholder = st.empty()
 
 if start_button:
-    # --- Game Initialization ---
-    plate_shape = (config["plate_schema"]["rows"], config["plate_schema"]["columns"])
-    ship_schema = config["ship_schema"]
-
-    Player1AI = available_ais[p1_ai_choice]
-    Player2AI = available_ais[p2_ai_choice]
+    Player1AI = game_ai_classes[st.session_state.game_ai_choice[1]]
+    Player2AI = game_ai_classes[st.session_state.game_ai_choice[2]]
+    p1_ai_choice = st.session_state.game_ai_choice[1]
+    p2_ai_choice = st.session_state.game_ai_choice[2]
 
     player_1 = Player1AI("player_1", plate_shape, ship_schema)
     player_2 = Player2AI("player_2", plate_shape, ship_schema)

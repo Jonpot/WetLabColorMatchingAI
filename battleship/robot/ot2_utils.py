@@ -282,6 +282,14 @@ class OT2Manager:
         """Queue a fire missile action."""
         self._add_action("fire_missile", {"plate_idx": plate_idx, "plate_well": plate_well})
 
+    def add_place_water_action(self, plate_idx: int, wells: List[str]) -> None:
+        """Queue action to place ocean water in specified wells."""
+        self._add_action("place_water_in_wells", {"plate_idx": plate_idx, "wells": wells})
+
+    def add_place_ships_action(self, plate_idx: int, wells: List[str]) -> None:
+        """Queue action to place ship fluid in specified wells."""
+        self._add_action("place_ships_in_wells", {"plate_idx": plate_idx, "wells": wells})
+
     def __del__(self) -> None:
         # Close the SSH connection when the object is deleted.
         try:
