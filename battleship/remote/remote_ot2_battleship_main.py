@@ -310,8 +310,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         remaining = 0
         for well in wells:
             if remaining < default_volume:
-                pipette.aspirate(pipette.max_volume, liquid)
-                remaining = pipette.max_volume
+                pipette.aspirate(pipette.max_volume-100, liquid)
+                remaining = pipette.max_volume-100
             pipette.dispense(default_volume, plate.labware[well].bottom(z=2.5))
             remaining -= default_volume
             plate.wells[well].volume += default_volume

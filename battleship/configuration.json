@@ -19,10 +19,6 @@
         "destroyer": {
             "length": 2,
             "count": 2
-        },
-        "raft": {
-            "length": 1,
-            "count": 1
         }
     }
 }
