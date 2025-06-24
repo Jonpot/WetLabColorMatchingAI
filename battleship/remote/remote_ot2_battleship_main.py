@@ -70,7 +70,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
               plate_1_slot: str = "4",
               plate_2_slot: str = "1",
               fluids_slot: str = "2",
-              tiprack_slot: str = "3",
+              tiprack_slots: list[str] = ["3","6"],
               ocean_fluid_well: str = "A1",
               ship_fluid_well: str = "A2",
               ammo_well: str = "A3",
@@ -83,7 +83,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         :param plate_type: The type of plate to use, as per the Opentrons API.
         """
-        tipracks: List[protocol_api.Labware] = [protocol.load_labware('opentrons_96_tiprack_300ul', location=tiprack_slot)]
+        tipracks: List[protocol_api.Labware] = [protocol.load_labware('opentrons_96_tiprack_300ul', location=slot) for slot in tiprack_slots]
 
         # Some tips may be missing, so we need to update the current state of the tip rack from
         # the file. This is necessary to avoid the robot trying to use tips that are not present.
@@ -400,7 +400,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     plate_1_slot = data.get("plate_1_slot", "4")
     plate_2_slot = data.get("plate_2_slot", "1")
     fluids_slot = data.get("fluids_slot", "2")
-    tiprack_slot = data.get("tiprack_slot", "3")
+    tiprack_slots = data.get("tiprack_slots", ["3","6"])
     
     ocean_fluid_well = data.get("ocean_fluid_well", "A1")
     ship_fluid_well = data.get("ship_fluid_well", "A2")
@@ -412,7 +412,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                                                                                                        plate_1_slot,
                                                                                                        plate_2_slot,
                                                                                                        fluids_slot,
-                                                                                                       tiprack_slot,
+                                                                                                       tiprack_slots,
                                                                                                        ocean_fluid_well,
                                                                                                        ship_fluid_well,
                                                                                                        ammo_well,
