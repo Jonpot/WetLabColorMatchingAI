@@ -5,7 +5,7 @@ import threading
 class CameraStream:
     """Background camera capture."""
     def __init__(self, cam_index: int = 0,
-                 res: tuple[int, int] | None = (1600, 1200),
+                 res: tuple[int, int] | None = (1920, 1080),
                  warm: int = 10,
                  display_feed: bool = False) -> None:
         display_feed = True
@@ -47,7 +47,7 @@ class CameraStream:
         while self.frame is None or (self.frame == 0).mean() > 0.9:
             print(f"Camera {self.cam_index} appears to be broken, restarting...")
             self.stop()
-            self.__init__(self.cam_index, res=None, warm=0, display_feed=self.display_feed)
+            self.__init__(self.cam_index)
             time.sleep(1)
 
         return self.frame

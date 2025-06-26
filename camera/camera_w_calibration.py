@@ -20,7 +20,6 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from camera.camera_stream import get_stream
-stream = get_stream(cam_index=0, res=(1920, 1080), warm=5, display_feed=True)
 
 WIN = "Calibration"            # OpenCV window name
 
@@ -51,7 +50,7 @@ class PlateProcessor:
     @staticmethod
     def snapshot(cam: int = 0, path: str = "camera/snapshot.jpg",
                  warm: int = 10, burst: int = 5,
-                 res: tuple[int, int] | None = (1600, 1200)) -> str:
+                 res: tuple[int, int] | None = (1920, 1080)) -> str:
         """Return the latest frame captured by a background thread."""
         stream = get_stream(cam_index=cam, res=res, warm=warm)
         img = stream.read()
