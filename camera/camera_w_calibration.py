@@ -13,6 +13,7 @@ camera_color_baseline.py  —  Baseline Color Calibration Pipeline
 # ssh -i C:\Users\shich\.ssh\ot2_ssh_key root@172.26.192.201
 from __future__ import annotations
 import cv2, time, json, os, argparse
+from .camera_stream import get_stream
 import numpy as np
 from pathlib import Path
 import sys
@@ -50,30 +51,11 @@ class PlateProcessor:
     def snapshot(cam: int = 0, path: str = "camera/snapshot.jpg",
                  warm: int = 10, burst: int = 5,
                  res: tuple[int, int] | None = (1600, 1200)) -> str:
-        """Capture a denoised snapshot (burst average)."""
-        cap = cv2.VideoCapture(cam, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            raise RuntimeError("Camera open failed")
-        if res:                          # set resolution before warm-up
-            w, h = res
-            cap.set(3, w)
-            cap.set(4, h)
-            time.sleep(0.2)
-
-        print("Warming up camera...")
-        for _ in range(warm):            # let exposure settle
-            cap.read()
-            time.sleep(0.04)
-
-        acc = None
-        print("Capturing burst...")
-        for _ in range(burst):
-            _, frm = cap.read()
-            acc = frm.astype(np.float32) if acc is None else acc + frm
-            time.sleep(0.02)
-        cap.release()
-
-        img = (acc / burst).astype(np.uint8)
+        """Return the latest frame captured by a background thread."""
+        stream = get_stream(cam_index=cam, res=res, warm=warm)
+        img = stream.read()
+        if img is None:
+            raise RuntimeError("No frame captured")
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(path, img, [cv2.IMWRITE_JPEG_QUALITY, 95])
         return path
