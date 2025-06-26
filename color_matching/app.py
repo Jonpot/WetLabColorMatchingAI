@@ -16,6 +16,14 @@ from typing import Iterable
 import itertools
 from sklearn.decomposition import PCA
 from GP_visualizer import plot_gp_predictions
+from color_matching.data.well_data_utils import (
+    load_table,
+    load_global_table,
+    clear_saved_tables,
+    record_measurements,
+    record_recipe,
+    populate_optimizer,
+)
 
 def rerun() -> None:
     """Trigger a Streamlit rerun regardless of version."""
@@ -100,6 +108,8 @@ if "robot" not in st.session_state:
     time.sleep(2)  # wait for lights to stabilize
 
 st.session_state.processor = PlateProcessor(virtual_mode=VIRTUAL_MODE)
+st.session_state.setdefault("well_data", load_table())
+st.session_state.setdefault("global_well_data", load_global_table())
 
 # track how many guesses we've made per row, and the measured RGBs+distances
 for row in ROWS:
@@ -128,6 +138,11 @@ if st.session_state.ai_optimizer is None:
             tolerance=COLOR_THRESHOLD,
             single_row_learning=False,
         )
+    populate_optimizer(
+        st.session_state.global_well_data,
+        st.session_state.ai_optimizer,
+        restore=True,
+    )
     #st.session_state.ai_optimizer.X_train = x_history
     #st.session_state.ai_optimizer.Y_train = y_history
 
@@ -152,8 +167,15 @@ if st.session_state.get("last_row") != row:
     st.session_state[f"history_{row}"] = []
 
     # snap the whole plate
-    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX,
-                                                          calib=f"secret/OT_{OT_NUMBER}/calibration.json")
+    full_plate = st.session_state.processor.process_image(
+        cam_index=CAM_INDEX,
+        calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+    )
+    record_measurements(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        full_plate,
+    )
 
     # extract the mystery target
     r_m, g_m, b_m = full_plate[ord(row) - ord("A")][MYSTERY_COL - 1]
@@ -236,6 +258,7 @@ restore_btn = st.button(
     "Restore model knowledge",
     disabled=st.session_state.ai_running,
 )
+clear_btn = st.button("Clear saved recipes", disabled=st.session_state.ai_running)
 
 # ——— ACTION ———
 if make_btn:
@@ -263,8 +286,15 @@ if make_btn:
         st.stop()
 
     # photo & measure
-    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX,
-                                                          calib=f"secret/OT_{OT_NUMBER}/calibration.json")
+    full_plate = st.session_state.processor.process_image(
+        cam_index=CAM_INDEX,
+        calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+    )
+    record_measurements(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        full_plate,
+    )
     # for debug: plot the full plate and all colors
     #st.image(full_plate, caption="Full plate image", use_column_width=True)
     row_idx = ord(row) - ord("A")
@@ -276,14 +306,24 @@ if make_btn:
     hist = st.session_state[f"history_{row}"]
     hist.append((rgb.tolist(), dist))
     st.session_state[f"guesses_{row}"] += 1
+    record_recipe(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        target_well,
+        [int(volumes[s]) for s in color_wells],
+    )
     rerun()
 
 if deploy_btn:
+    st.session_state.well_data = load_table()
+    st.session_state.global_well_data = load_global_table()
+    st.session_state.ai_target = st.session_state.well_data[
+        f"{row}{MYSTERY_COL}"
+    ]["rgb"]
     st.session_state.ai_running = True
     st.session_state.ai_row = row
     st.session_state.ai_iter = 0
     st.session_state.ai_used_combos = set()
-    st.session_state.ai_target = st.session_state[f"mystery_rgb_{row}"]
     st.session_state.ai_log = []
     st.session_state.ai_step_pending = True
     rerun()
@@ -301,7 +341,18 @@ if reset_btn:
     st.session_state.ai_optimizer.reset()
     st.rerun()
 if restore_btn:
-    st.session_state.ai_optimizer.restore_permanent_data()
+    populate_optimizer(
+        st.session_state.global_well_data,
+        st.session_state.ai_optimizer,
+        restore=True,
+    )
+    st.rerun()
+if clear_btn:
+    st.session_state.well_data = clear_saved_tables()
+    st.session_state.global_well_data = st.session_state.well_data.copy()
+    st.session_state.ai_optimizer.reset()
+    st.session_state.ai_optimizer.X_train_permanent = []
+    st.session_state.ai_optimizer.Y_train_permanent = []
     st.rerun()
 
 # ——— DISPLAY HISTORY ———
@@ -375,7 +426,12 @@ def _ai_step() -> None:
     optimizer: ColorLearningOptimizer = st.session_state.ai_optimizer
     robot = st.session_state.robot
     processor = st.session_state.processor
-    target_color: Iterable[int] = st.session_state.ai_target
+    st.session_state.well_data = load_table()
+    st.session_state.global_well_data = load_global_table()
+    target_color: Iterable[int] = st.session_state.well_data[
+        f"{row_letter}{MYSTERY_COL}"
+    ]["rgb"]
+    st.session_state.ai_target = target_color
     iteration: int = st.session_state.ai_iter
     used: set = st.session_state.ai_used_combos
 
@@ -433,8 +489,15 @@ def _ai_step() -> None:
             else:
                 raise
 
-    color_data = processor.process_image(cam_index=CAM_INDEX,
-                                         calib=f"secret/OT_{OT_NUMBER}/calibration.json")
+    color_data = processor.process_image(
+        cam_index=CAM_INDEX,
+        calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+    )
+    record_measurements(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        color_data,
+    )
     measured_color = color_data[row_idx][column - 1]
     st.session_state.ai_log.append(f"Measured: {measured_color}")
 
@@ -445,6 +508,12 @@ def _ai_step() -> None:
     hist = st.session_state[f"history_{row_letter}"]
     hist.append((measured_color.tolist(), float(distance)))
     st.session_state[f"guesses_{row_letter}"] += 1
+    record_recipe(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        well_coordinate,
+        vols,
+    )
 
     if optimizer.within_tolerance(measured_color, target_color):
         st.session_state.ai_log.append(f"Matched with {vols}")
