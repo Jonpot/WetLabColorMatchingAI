@@ -45,6 +45,7 @@ class BattleshipGame:
 
                 # 1b. Check that the move is valid, it must target an unknown well. If it's not valid, call the random AI to select a valid move.
                 if self.players[player_id].board_state[move] != WellState.UNKNOWN:
+                    print(f"Warning: {player_id} attempted to fire at an already targeted well {move}. Using backup random AI to select a valid move.")
                     move = self.backup_random_ai.select_next_move()
 
                 # 2. Fire the missile on the physical plate

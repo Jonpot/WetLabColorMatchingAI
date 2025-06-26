@@ -70,4 +70,5 @@ class BattleshipAI(ABC):
         """
         total_ship_segments = sum(ship['length'] * ship['count'] for ship in self.ship_schema.values())
         current_hits = np.sum(self.board_state == WellState.HIT)
+        print(f"Player {self.player_id} has {current_hits} hits out of {total_ship_segments} total ship segments.")
         return current_hits >= total_ship_segments

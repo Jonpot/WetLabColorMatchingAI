@@ -340,6 +340,11 @@ with st.sidebar:
 
                     st.session_state.robot.execute_actions_on_remote()
                     st.session_state.liquids_placed[plate_id] = True
+                    st.rerun()  # Refresh to update UI
+            else:
+                st.success("✅💧 Liquids placed on this plate.")
+        else:
+            st.warning("No placement generated yet. Please select a Placement AI and run it.")
         st.session_state.game_ai_choice[plate_id] = st.selectbox("Select gameplay AI", options=game_ai_names, key=f"game_ai_{plate_id}")
 
     ready = all(st.session_state.liquids_placed.values()) and all(st.session_state.game_ai_choice.values())
@@ -395,8 +400,17 @@ if start_button:
             winner = state['winner']
             break # Exit the loop once a winner is found
             
-        time.sleep(1.0) # Pause between moves to make it watchable
+        time.sleep(0.2) # Pause between moves to make it watchable
 
     if winner:
         winner_name = p1_ai_choice if winner == 'player_1' else p2_ai_choice
         status_placeholder.success(f"## 🎉 GAME OVER! {winner} ({winner_name}) wins! 🎉")
+
+# Add a button to reset the game- this will clear only st.session_state.liquids_placed
+if st.button("♻️ Reset Game"):
+    st.session_state.liquids_placed = {1: False, 2: False}
+    st.session_state.game_ai_choice = {1: None, 2: None}
+    st.session_state.placement = {1: None, 2: None}
+    st.rerun()
+
+print(st.session_state.liquids_placed, st.session_state.game_ai_choice, st.session_state.placement)
