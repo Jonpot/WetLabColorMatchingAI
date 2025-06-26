@@ -23,7 +23,8 @@ from battleship.plate_state_processor import DualPlateStateProcessor, WellState
 from battleship.robot.ot2_utils import OT2Manager
 from battleship.ai.base_ai import BattleshipAI
 from battleship.ai.probabilistic_ai import ProbabilisticAI  # Default AI
-from battleship.placement_ai import PlacementAI, NaivePlacementAI
+from battleship.ai.go_wrapper import GoWrapperAI
+from battleship.placement_ai import PlacementAI, NaivePlacementAI, GoPlacementWrapperAI
 from battleship import placement_ai
 from battleship.placement_utils import validate_placement_schema, coords_from_schema
 
@@ -79,7 +80,7 @@ def save_config(cfg: Dict[str, Any]) -> None:
 
 def find_ai_classes() -> Dict[str, Type[BattleshipAI]]:
     """Dynamically finds all subclasses of BattleshipAI in the 'battleship.ai' module."""
-    ai_classes = {"ProbabilisticAI": ProbabilisticAI} # Start with the default
+    ai_classes = {"ProbabilisticAI": ProbabilisticAI}  # Start with the default
     ai_module_path = Path(__file__).resolve().parent.parent / "battleship" / "ai"
     
     for _, module_name, _ in pkgutil.iter_modules([str(ai_module_path)]):
@@ -91,6 +92,20 @@ def find_ai_classes() -> Dict[str, Type[BattleshipAI]]:
                         ai_classes[name] = obj
             except Exception as e:
                 st.warning(f"Could not load AI from {module_name}: {e}")
+
+    # Discover Go executables
+    go_dir = ai_module_path / "go_ais"
+    if go_dir.exists():
+        for exe in go_dir.glob("*.exe"):
+            exe_path = str(exe)
+            name = exe.stem
+
+            class _GoExeAI(GoWrapperAI):
+                def __init__(self, player_id: str, board_shape: Tuple[int, int], ship_schema: Dict[str, Any], _path: str = exe_path) -> None:
+                    super().__init__(player_id, board_shape, ship_schema, go_executable=_path)
+
+            _GoExeAI.__name__ = name
+            ai_classes[name] = _GoExeAI
     return ai_classes
 
 
@@ -106,6 +121,20 @@ def find_placement_ai_classes() -> Dict[str, Type[PlacementAI]]:
                         classes[name] = obj
             except Exception as e:
                 st.warning(f"Could not load Placement AI from {module_name}: {e}")
+
+    # Discover Go executables for placement
+    go_dir = module_path / "go_ais"
+    if go_dir.exists():
+        for exe in go_dir.glob("*.exe"):
+            exe_path = str(exe)
+            name = exe.stem
+
+            class _GoPlacementExeAI(GoPlacementWrapperAI):
+                def __init__(self, board_shape: Tuple[int, int], ship_schema: Dict[str, Any], _path: str = exe_path) -> None:
+                    super().__init__(board_shape, ship_schema, go_executable=_path)
+
+            _GoPlacementExeAI.__name__ = name
+            classes[name] = _GoPlacementExeAI
     # ensure RandomPlacementAI is included from package init
     classes.setdefault("RandomPlacementAI", placement_ai.RandomPlacementAI)
     return classes
