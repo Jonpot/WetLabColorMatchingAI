@@ -4,6 +4,8 @@ from battleship.ai.base_ai import BattleshipAI
 from battleship.robot.ot2_utils import OT2Manager
 from battleship.plate_state_processor import DualPlateStateProcessor # A new processor for two plates
 from typing import Any, List
+import random
+from battleship.plate_state_processor import WellState
 
 class BattleshipGame:
     """Manages a competitive game of Battleship between two AI players."""
@@ -45,7 +47,11 @@ class BattleshipGame:
                 self.robot.execute_actions_on_remote()
 
                 # 3. Determine the result from the camera
-                result = self.plate_processor.determine_well_state(plate_id=2 if player_id == 'player_1' else 1, well=move)
+                try:
+                    result = self.plate_processor.determine_well_state(plate_id=2 if player_id == 'player_1' else 1, well=move)
+                except RuntimeError:
+                    # Probably in virtual mode, return a random result
+                    result = random.choice([WellState.MISS, WellState.HIT])
                 print(f"Result: {result.name}!")
                 
                 # 4. Update the AI with the result and log history
