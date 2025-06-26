@@ -22,7 +22,7 @@ from battleship.game_manager import BattleshipGame
 from battleship.plate_state_processor import DualPlateStateProcessor, WellState
 from battleship.robot.ot2_utils import OT2Manager
 from battleship.ai.base_ai import BattleshipAI
-from battleship.ai.probabilistic_ai import ProbabilisticAI  # Default AI
+from battleship.ai.random_ai import RandomAI  # Default AI
 from battleship.ai.go_wrapper import GoWrapperAI
 from battleship.placement_ai import PlacementAI, NaivePlacementAI, GoPlacementWrapperAI
 from battleship import placement_ai
@@ -80,11 +80,11 @@ def save_config(cfg: Dict[str, Any]) -> None:
 
 def find_ai_classes() -> Dict[str, Type[BattleshipAI]]:
     """Dynamically finds all subclasses of BattleshipAI in the 'battleship.ai' module."""
-    ai_classes = {"ProbabilisticAI": ProbabilisticAI}  # Start with the default
+    ai_classes = {"RandomAI": RandomAI}  # Start with the default
     ai_module_path = Path(__file__).resolve().parent.parent / "battleship" / "ai"
     
     for _, module_name, _ in pkgutil.iter_modules([str(ai_module_path)]):
-        if module_name not in ["base_ai", "probabilistic_ai"]:
+        if module_name not in ["base_ai", "random_ai"]:
             try:
                 module = importlib.import_module(f"battleship.ai.{module_name}")
                 for name, obj in inspect.getmembers(module, inspect.isclass):
