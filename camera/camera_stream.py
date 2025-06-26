@@ -8,10 +8,13 @@ class CameraStream:
                  res: tuple[int, int] | None = (1600, 1200),
                  warm: int = 10,
                  display_feed: bool = False) -> None:
+        display_feed = True
         self.cam_index = cam_index
         self.cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
-        if not self.cap.isOpened():
-            raise RuntimeError("Camera open failed")
+        while not self.cap.isOpened():
+            time.sleep(0.2)
+            self.cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+            print(f"Waiting for camera {cam_index} to open...")
         if res:
             w, h = res
             self.cap.set(3, w)
@@ -38,6 +41,15 @@ class CameraStream:
             time.sleep(0.01)
 
     def read(self):
+        # Sometimes, this camera breaks and returns all black.
+        # If 90% of the pixels are pure black, we assume it's broken.
+        # Kill the thread and restart it.
+        while self.frame is None or (self.frame == 0).mean() > 0.9:
+            print(f"Camera {self.cam_index} appears to be broken, restarting...")
+            self.stop()
+            self.__init__(self.cam_index, res=None, warm=0, display_feed=self.display_feed)
+            time.sleep(1)
+
         return self.frame
 
     def stop(self) -> None:
@@ -58,3 +70,18 @@ def get_stream(cam_index: int = 0,
         stream = CameraStream(cam_index, res=res, warm=warm, display_feed=display_feed)
         _streams[cam_index] = stream
     return stream
+
+
+if __name__ == "__main__":
+    # Example usage
+    stream = get_stream(cam_index=0, res=(640, 480), warm=5, display_feed=True)
+    try:
+        while True:
+            frame = stream.read()
+            if frame is not None:
+                cv2.imshow("Camera Feed", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+    finally:
+        stream.stop()
+        cv2.destroyAllWindows()

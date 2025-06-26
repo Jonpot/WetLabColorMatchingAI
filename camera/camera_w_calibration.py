@@ -13,13 +13,14 @@ camera_color_baseline.py  —  Baseline Color Calibration Pipeline
 # ssh -i C:\Users\shich\.ssh\ot2_ssh_key root@172.26.192.201
 from __future__ import annotations
 import cv2, time, json, os, argparse
-from .camera_stream import get_stream
+
 import numpy as np
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+from camera.camera_stream import get_stream
+stream = get_stream(cam_index=0, res=(1920, 1080), warm=5, display_feed=True)
 
 WIN = "Calibration"            # OpenCV window name
 

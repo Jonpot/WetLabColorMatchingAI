@@ -40,8 +40,8 @@ OT_NUMBER = 4
 WHITE_THRESHOLD = 120  # RGB threshold for white detection
 
 
-# Example available color slots
-color_slots = ["7", "8", "9"]
+# Example available color wells
+color_wells  = ["A1", "A2", "A3"]
 dye_colors = ['r', 'y', 'b']  # red, yellow, blue, for visuals only, never to be fed to the AI
 
 FORCE_REMOTE = True  # set to True to force remote connection
@@ -124,7 +124,7 @@ st.session_state.setdefault("ai_step_pending", False)
 #st.session_state.ai_optimizer = None
 if st.session_state.ai_optimizer is None:
     st.session_state.ai_optimizer = ColorLearningOptimizer(
-            dye_count=len(color_slots),
+            dye_count=len(color_wells ),
             tolerance=COLOR_THRESHOLD,
             single_row_learning=False,
         )
@@ -182,9 +182,9 @@ st.markdown(
 )
 
 st.subheader("Build your recipe")
-cols = st.columns(len(color_slots))
+cols = st.columns(len(color_wells ))
 volumes = {}
-for i, slot in enumerate(color_slots):
+for i, slot in enumerate(color_wells ):
     with cols[i]:
         volumes[slot] = st.number_input(
             f"Slot {slot}",
@@ -388,7 +388,7 @@ def _ai_step() -> None:
     )
 
     # Update the exploration weight based on the number of guesses
-    if iteration < len(color_slots):
+    if iteration < len(color_wells ):
         #optimizer.update_exploration_weight(0.4)
         exploration_weight = 1
     else:
@@ -414,7 +414,7 @@ def _ai_step() -> None:
             for i, volume in enumerate(vols):
                 if volume > 0:
                     robot.add_add_color_action(
-                        color_slot=color_slots[i],
+                        color_well=color_wells[i],
                         plate_well=well_coordinate,
                         volume=volume,
                     )

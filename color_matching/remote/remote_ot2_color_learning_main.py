@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Tuple
 from opentrons import protocol_api
 import time
 
-color_slots = ['4','5','6','7','8','9','10','11']
+color_wells = ['A1','A2','A3','A4','A5', 'A6','A7','A8','A9','A10', 'A11', 'A12']
 ascii_uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 metadata = {
@@ -67,7 +67,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         #protocol.comment(f"output file path = {output_file_destination_path}")
         return output_file_destination_path
 
-    def setup(plate_type: str = "corning_96_wellplate_360ul_flat") -> tuple[dict[str, protocol_api.Labware],
+    def setup(plate_type: str = "corning_96_wellplate_360ul_flat", fluids_slot = '2') -> tuple[dict[str, protocol_api.Labware],
                                                                       Plate, protocol_api.InstrumentContext,
                                                                       list[bool],
                                                                       list[protocol_api.Labware]]:
@@ -94,10 +94,11 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             tiprack_state = [True] * 96
 
         colors: dict[str, protocol_api.Labware] = {}
-        for slot in color_slots:
-            colors[slot] = protocol.load_labware('nest_1_reservoir_290ml', location=str(slot))['A1']
+        color_labware = protocol.load_labware('nest_12_reservoir_15ml', location=fluids_slot)
+        for well in color_wells:
+            colors[well] = color_labware[well]
 
-        plate_labware = protocol.load_labware(plate_type, label="Dye Plate", location='1')
+        plate_labware = protocol.load_labware(plate_type, label="Plate", location='1')
         plate = Plate(plate_labware, len(plate_labware.rows()), len(plate_labware.columns()), plate_labware.wells()[0].max_volume)
 
         pipette = protocol.load_instrument('p300_single_gen2', 'left', tip_racks=tipracks)
@@ -214,14 +215,14 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         protocol.comment("Tip rack refreshed.")
 
     def add_color(
-            color_slot: str | int,
+            color_well: str | int,
             plate_well: str,
             volume: float,
             new_tip: bool = True) -> None:
         """
         Adds a color to the plate at the specified well.
 
-        :param color_slot: The slot of the color reservoir.
+        :param color_well: The well of the color reservoir.
         :param plate_well: The well of the plate to add the color to.
         :param volume: The volume of the color to add.
 
@@ -232,9 +233,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             raise WellFullError("Cannot add color to well; well is full.")
 
         if new_tip:
-            pick_up_tip(tip_ID=color_slot)
+            pick_up_tip(tip_ID=color_well)
 
-        pipette.aspirate(volume, colors[color_slot])
+        pipette.aspirate(volume, colors[color_well])
         pipette.touch_tip(plate.labware[plate_well], v_offset=15, radius=0) # necessary to avoid crashing against the large adapter
         pipette.dispense(volume, plate.labware[plate_well].bottom(z=2.5))
 
@@ -244,7 +245,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
         if new_tip:
-            return_tip(tip_ID=color_slot)
+            return_tip(tip_ID=color_well)
 
     def mix(
             plate_well: str | int,
@@ -316,10 +317,11 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     ### MAIN PROTOCOL ###
 
     plate_type = "corning_96_wellplate_360ul_flat"
+    fluids_slot = '2'
     global tiprack_state, run_flag, reduced_tips_info
     reduced_tips_info = None
     protocol.comment("Loading labware and instruments...")
-    colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type)
+    colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, fluids_slot)
     # Wait for the json to change
 
     run_flag = True
@@ -387,7 +389,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         #         },
         #         {
         #            "add_color": {
-        #               "color_slot": "7",
+        #               "color_well": "A2",
         #               "plate_well": "A1",
         #               "volume": 100
         #            }
@@ -420,7 +422,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     refresh_tiprack()
                 elif subaction_name == "add_color":
                     try:
-                        add_color(subaction_args["color_slot"], subaction_args["plate_well"], subaction_args["volume"], subaction_args["new_tip"])
+                        add_color(subaction_args["color_well"], subaction_args["plate_well"], subaction_args["volume"], subaction_args["new_tip"])
                     except WellFullError as e:
                         return failed_to_run_actions(e)
                     except TiprackEmptyError as e:

@@ -260,9 +260,9 @@ class OT2Manager:
         """Queue a refresh tip rack action."""
         self._add_action("refresh_tiprack")
 
-    def add_add_color_action(self, color_slot: str, plate_well: str, volume: float, new_tip: bool = True) -> None:
+    def add_add_color_action(self, color_well: str, plate_well: str, volume: float, new_tip: bool = True) -> None:
         """Queue an add color action."""
-        self._add_action("add_color", {"color_slot": color_slot, "plate_well": plate_well, "volume": volume, "new_tip": new_tip})
+        self._add_action("add_color", {"color_well": color_well, "plate_well": plate_well, "volume": volume, "new_tip": new_tip})
 
     def add_get_tip_action(self, tip_ID: str = None) -> None:
         """Queue a get tip action."""

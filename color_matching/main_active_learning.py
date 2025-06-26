@@ -31,7 +31,7 @@ def active_learn_row(
     optimizer: ColorLearningOptimizer,
     row_letter: str,
     target_color: Iterable[int],
-    color_slots: List[str],
+    color_wells: List[str],
     cam_index: int = 0,
     max_iterations: int = 11,
     log_cb: Callable[[str], None] | None = None,
@@ -46,7 +46,7 @@ def active_learn_row(
         Plate row identifier (``"A"``-``"H"``).
     target_color : iterable of int
         The RGB target colour present in column 1.
-    color_slots : list of str
+    color_wells : list of str
         Identifiers of the dye reservoirs.
     max_iterations : int, optional
         Maximum number of guess iterations.  Defaults to 11.
@@ -86,7 +86,7 @@ def active_learn_row(
                 for i, volume in enumerate(volumes):
                     if volume > 0:
                         robot.add_add_color_action(
-                            color_slot=color_slots[i],
+                            color_well=color_wells[i],
                             plate_well=well_coordinate,
                             volume=volume,
                         )
@@ -154,11 +154,11 @@ def run_active_learning() -> None:
     robot.add_turn_on_lights_action()
     robot.execute_actions_on_remote()
 
-    color_slots = ["7", "8", "9"]
+    color_wells = ["A1", "A2", "A3"]
     plate_rows = ["A", "B", "C", "D"]
 
     optimizer = ColorLearningOptimizer(
-        dye_count=len(color_slots),
+        dye_count=len(color_wells),
         max_well_volume=200,
         step=1,
         tolerance=15,
@@ -185,7 +185,7 @@ def run_active_learning() -> None:
                 optimizer,
                 row_letter,
                 target_color,
-                color_slots,
+                color_wells,
                 max_iterations=11,
                 log_cb=logger,
             )

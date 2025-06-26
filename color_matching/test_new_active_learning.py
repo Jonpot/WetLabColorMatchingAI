@@ -49,7 +49,7 @@ if __name__ == "__main__":
         optimizer=optimizer,
         row_letter=row,
         target_color=target_color,
-        color_slots=color_slots,
+        color_wells=color_slots,
         cam_index=CAM_INDEX,
         log_cb=log_cb,
     )

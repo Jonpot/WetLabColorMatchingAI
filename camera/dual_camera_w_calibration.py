@@ -13,12 +13,13 @@ dual_camera_color_baseline.py — Dual-Plate Baseline Color Calibration Pipeline
 """
 from __future__ import annotations
 import cv2, time, json, os, argparse
-from .camera_stream import get_stream
 import numpy as np
 from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from camera.camera_stream import get_stream
+stream = get_stream(cam_index=0, res=(1920, 1080), warm=5, display_feed=True)
 
 
 WIN = "Dual Plate Calibration"      # OpenCV window name

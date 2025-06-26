@@ -166,7 +166,7 @@ for color in COLORS:
         color_volume = recipe[color]
         if color_volume > 0:
             robot.add_add_color_action(
-                color_slot=color_slots[color],
+                color_well=color_slots[color],
                 plate_well=well,
                 volume=color_volume,
                 new_tip=False
@@ -179,7 +179,7 @@ for i, recipe in df.iterrows():
     water_volume = recipe["water_vol"]
     if water_volume > 0:
         robot.add_add_color_action(
-            color_slot=color_slots["water"],
+            color_well=color_slots["water"],
             plate_well=well,
             volume=water_volume,
             new_tip=False
