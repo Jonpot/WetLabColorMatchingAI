@@ -25,6 +25,9 @@ func main() {
 		fmt.Printf("0 0")
 		return
 	}
+
+	// Implementation of AI logic:
+
 	var unknowns [][2]int
 	for i, row := range board {
 		for j, cell := range row {
@@ -39,5 +42,10 @@ func main() {
 	}
 	rand.Seed(time.Now().UnixNano())
 	pick := unknowns[rand.Intn(len(unknowns))]
+
+	// End implementation of AI logic
+	// Note that "pick" must be assigned, where pickis a [2]int where pick[0] is the row and pick[1] is the column
+	// Output the chosen coordinates
+
 	fmt.Printf("%d %d", pick[0], pick[1])
 }

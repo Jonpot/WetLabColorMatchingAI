@@ -1,6 +1,7 @@
 from typing import Dict
 from string import ascii_uppercase
 from battleship.ai.base_ai import BattleshipAI
+from battleship.ai.random_ai import RandomAI
 from battleship.robot.ot2_utils import OT2Manager
 from battleship.plate_state_processor import DualPlateStateProcessor # A new processor for two plates
 from typing import Any, List
@@ -19,6 +20,8 @@ class BattleshipGame:
         self.plate_processor = plate_processor
         self.robot = robot
         self.history: List[Dict[str, Any]] = []
+
+        self.backup_random_ai = RandomAI('backup_random_ai', board_shape=player_1_ai.board_shape, ship_schema=player_1_ai.ship_schema)
 
     def run_game_live(self):
         """
@@ -39,7 +42,11 @@ class BattleshipGame:
                 
                 # 1. Get move from the current player's AI
                 move = ai.select_next_move()
-                
+
+                # 1b. Check that the move is valid, it must target an unknown well. If it's not valid, call the random AI to select a valid move.
+                if self.players[player_id].board_state[move] != WellState.UNKNOWN:
+                    move = self.backup_random_ai.select_next_move()
+
                 # 2. Fire the missile on the physical plate
                 well_name = f"{ascii_uppercase[move[0]]}{move[1] + 1}"
                 print(f"Turn {turn}, {player_id}: Firing at {well_name}...")

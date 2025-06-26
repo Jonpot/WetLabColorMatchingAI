@@ -3,7 +3,7 @@ from typing import Tuple, List
 from battleship.ai.base_ai import BattleshipAI
 from battleship.plate_state_processor import WellState
 
-class ProbabilisticAI(BattleshipAI):
+class JonsProbabilisticAI(BattleshipAI):
     """
     A probabilistic "hunt and target" AI implementation for Battleship.
     This can be used as an example for students or as a default competitor.
