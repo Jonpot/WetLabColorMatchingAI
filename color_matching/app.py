@@ -48,6 +48,7 @@ VIRTUAL_MODE = False  # set to True for virtual mode
 
 OT_NUMBER = 4
 
+STERILE = True
 WHITE_THRESHOLD = 120  # RGB threshold for white detection
 
 
@@ -274,12 +275,14 @@ if make_btn:
         if vol > 0:
             robot.add_add_color_action(tip_ID=slot,
                                        plate_well=target_well,
-                                       volume=int(vol))
+                                       volume=int(vol),
+                                       sterile=STERILE)
             total_vol += vol
     robot.add_mix_action(
         plate_well=target_well,
         volume=total_vol/2,
-        repetitions=3
+        repetitions=3,
+        sterile=STERILE
     )
     try:
         robot.execute_actions_on_remote()
@@ -489,11 +492,13 @@ def _ai_step() -> None:
                         color_well=color_wells[i],
                         plate_well=well_coordinate,
                         volume=volume,
+                        sterile = STERILE,
                     )
             robot.add_mix_action(
                 plate_well=well_coordinate,
                 volume=optimizer.max_well_volume / 2,
                 repetitions=3,
+                sterile = STERILE,
             )
             robot.execute_actions_on_remote()
             break

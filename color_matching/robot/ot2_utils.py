@@ -260,9 +260,9 @@ class OT2Manager:
         """Queue a refresh tip rack action."""
         self._add_action("refresh_tiprack")
 
-    def add_add_color_action(self, color_well: str, plate_well: str, volume: float, new_tip: bool = True) -> None:
+    def add_add_color_action(self, color_well: str, plate_well: str, volume: float, new_tip: bool = True, sterile: bool = False) -> None:
         """Queue an add color action."""
-        self._add_action("add_color", {"color_well": color_well, "plate_well": plate_well, "volume": volume, "new_tip": new_tip})
+        self._add_action("add_color", {"color_well": color_well, "plate_well": plate_well, "volume": volume, "new_tip": new_tip, "sterile": sterile})
 
     def add_get_tip_action(self, tip_ID: str = None) -> None:
         """Queue a get tip action."""
@@ -272,9 +272,9 @@ class OT2Manager:
         """Queue a return tip action."""
         self._add_action("return_tip", {"tip_ID": tip_ID})
 
-    def add_mix_action(self, plate_well: str, volume: float = 100, repetitions: int = 3) -> None:
+    def add_mix_action(self, plate_well: str, volume: float = 100, repetitions: int = 3, sterile: bool = False) -> None:
         """Queue a mix action."""
-        self._add_action("mix", {"plate_well": plate_well, "volume": volume, "repetitions": repetitions})
+        self._add_action("mix", {"plate_well": plate_well, "volume": volume, "repetitions": repetitions, "sterile": sterile})
 
     def __del__(self) -> None:
         # Close the SSH connection when the object is deleted.
