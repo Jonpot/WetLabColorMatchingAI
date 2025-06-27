@@ -214,7 +214,6 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.reset_tipracks()
         protocol.comment("Tip rack refreshed.")
 
-    unique_id = 0
     def add_color(
             color_well: str | int,
             plate_well: str,
@@ -329,13 +328,30 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         run_flag = False
         protocol.comment("Protocol closed.")
+        
+    def failed_to_run_actions(e: str) -> None:
+        """
+        Handle the case where the robot fails to run actions.
 
+        :param e: The error message.
+        """
+        # Set is_updated to False
+        data["is_updated"] = False
+        # Remove the actions key
+        data.pop("actions", None)
+
+        # Write the updated JSON back to the file
+        with open(get_filename('args.jsonx'), 'w') as f:
+            json.dump(data, f)
+        protocol.comment("args.jsonx updated. Waiting for next update...")
+        protocol.comment(f"Error: {e}. Waiting for next update...")
 
     ### MAIN PROTOCOL ###
 
     plate_type = "corning_96_wellplate_360ul_flat"
     fluids_slot = '2'
-    global tiprack_state, run_flag, reduced_tips_info
+    global tiprack_state, run_flag, reduced_tips_info, unique_id
+    unique_id = 0
     reduced_tips_info = None
     protocol.comment("Loading labware and instruments...")
     colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, fluids_slot)
@@ -480,19 +496,4 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         protocol.comment("Ready")
 
 
-    def failed_to_run_actions(e: str) -> None:
-        """
-        Handle the case where the robot fails to run actions.
-
-        :param e: The error message.
-        """
-        # Set is_updated to False
-        data["is_updated"] = False
-        # Remove the actions key
-        data.pop("actions", None)
-
-        # Write the updated JSON back to the file
-        with open(get_filename('args.jsonx'), 'w') as f:
-            json.dump(data, f)
-        protocol.comment("args.jsonx updated. Waiting for next update...")
-        protocol.comment(f"Error: {e}. Waiting for next update...")
+    

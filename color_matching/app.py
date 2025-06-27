@@ -106,7 +106,14 @@ if "robot" not in st.session_state:
         )
 
     st.session_state.robot.add_turn_on_lights_action()
-    st.session_state.robot.execute_actions_on_remote()
+    try:
+        st.session_state.robot.execute_actions_on_remote()
+    except RuntimeError:
+        if st.session_state.robot.last_error_type == TiprackEmptyError:
+            input("Please add a fresh tiprack. Press enter when you're ready to continue.")
+            st.session_state.robot.add_refresh_tiprack_action()
+            st.session_state.robot.execute_actions_on_remote()
+
 
     print("Lights turned on.")
     time.sleep(2)  # wait for lights to stabilize
@@ -285,10 +292,15 @@ if make_btn:
         sterile=STERILE
     )
     try:
-        robot.execute_actions_on_remote()
-    except Exception as e:
-        st.error(f"Robot error: {e}")
-        st.stop()
+        st.session_state.robot.execute_actions_on_remote()
+    except RuntimeError:
+        if st.session_state.robot.last_error_type == TiprackEmptyError:
+            input("Please add a fresh tiprack. Press enter when you're ready to continue.")
+            st.session_state.robot.add_refresh_tiprack_action()
+            st.session_state.robot.execute_actions_on_remote()
+        else:
+            st.stop()
+            
 
     # photo & measure
     full_plate = st.session_state.processor.process_image(
