@@ -1,5 +1,6 @@
 # app.py
 from pathlib import Path
+from string import ascii_uppercase
 import sys 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -20,6 +21,8 @@ from color_matching.data.well_data_utils import (
     load_table,
     load_global_table,
     clear_saved_tables,
+    clear_current_saved_table,
+    restore_global_table,
     record_measurements,
     record_recipe,
     populate_optimizer,
@@ -52,7 +55,7 @@ WHITE_THRESHOLD = 120  # RGB threshold for white detection
 color_wells  = ["A1", "A2", "A3"]
 dye_colors = ['r', 'y', 'b']  # red, yellow, blue, for visuals only, never to be fed to the AI
 
-FORCE_REMOTE = True  # set to True to force remote connection
+FORCE_REMOTE = False  # set to True to force remote connection
 
 # ——— info.json ———
 try:
@@ -141,7 +144,6 @@ if st.session_state.ai_optimizer is None:
     populate_optimizer(
         st.session_state.global_well_data,
         st.session_state.ai_optimizer,
-        restore=True,
     )
     #st.session_state.ai_optimizer.X_train = x_history
     #st.session_state.ai_optimizer.Y_train = y_history
@@ -159,41 +161,41 @@ st.markdown(
 row = st.selectbox("Select row", ROWS, disabled=st.session_state.ai_running)
 
 # ——— ROW SWITCH: re-read plate & prepopulate history ———
-if st.session_state.get("last_row") != row:
-    st.session_state.last_row = row
+st.session_state.last_row = row
 
-    # reset counters & history
-    st.session_state[f"guesses_{row}"] = 0
-    st.session_state[f"history_{row}"] = []
+# reset counters & history
+st.session_state[f"guesses_{row}"] = 0
+st.session_state[f"history_{row}"] = []
 
-    # snap the whole plate
-    full_plate = st.session_state.processor.process_image(
-        cam_index=CAM_INDEX,
-        calib=f"secret/OT_{OT_NUMBER}/calibration.json",
-    )
-    record_measurements(
-        st.session_state.well_data,
-        st.session_state.global_well_data,
-        full_plate,
-    )
+# snap the whole plate
+full_plate = st.session_state.processor.process_image(
+    cam_index=CAM_INDEX,
+    calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+)
+record_measurements(
+    st.session_state.well_data,
+    st.session_state.global_well_data,
+    full_plate,
+)
 
-    # extract the mystery target
-    r_m, g_m, b_m = full_plate[ord(row) - ord("A")][MYSTERY_COL - 1]
-    myst_rgb = np.array([r_m, g_m, b_m])
-    st.session_state[f"mystery_rgb_{row}"] = myst_rgb.tolist()
+# extract the mystery target
+r_m, g_m, b_m = st.session_state.global_well_data[f'{row}{MYSTERY_COL}']['rgb']
+myst_rgb = np.array([r_m, g_m, b_m])
+st.session_state[f"mystery_rgb_{row}"] = myst_rgb.tolist()
 
-    # now scan existing guesses in cols 2→12
-    prehist = []
-    for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
-        rgb = full_plate[ord(row) - ord("A")][col]
-        # white threshold:
-        if any(ch < WHITE_THRESHOLD for ch in rgb):
-            dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
-            prehist.append((rgb.tolist(), dist))
+# now scan existing guesses in cols 2→12
+prehist = []
+for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
+    rgb = np.array(st.session_state.global_well_data[f'{row}{col}']['rgb'])
+    recipe = st.session_state.global_well_data[f'{row}{col}']['recipe']
+    # white threshold:
+    if recipe not in ['empty', 'unknown']:
+        dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
+        prehist.append((rgb.tolist(), dist))
 
-    # seed session_state
-    st.session_state[f"history_{row}"] = prehist
-    st.session_state[f"guesses_{row}"]  = len(prehist)
+# seed session_state
+st.session_state[f"history_{row}"] = prehist
+st.session_state[f"guesses_{row}"]  = len(prehist)
 
 st.markdown(f"**Mystery color (Col {MYSTERY_COL}) for row {row}:**")
 r, g, b = st.session_state[f"mystery_rgb_{row}"]
@@ -338,21 +340,35 @@ if close_btn:
         st.stop()
 
 if reset_btn:
-    st.session_state.ai_optimizer.reset()
+    st.session_state.well_data = clear_current_saved_table()
+    populate_optimizer(
+        st.session_state.well_data,
+        st.session_state.ai_optimizer,
+    )
     st.rerun()
 if restore_btn:
+    color_data = st.session_state.processor.process_image(
+        cam_index=CAM_INDEX,
+        calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+    )
+    record_measurements(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        color_data,
+    )
+    st.session_state.well_data = restore_global_table()
     populate_optimizer(
         st.session_state.global_well_data,
         st.session_state.ai_optimizer,
-        restore=True,
     )
     st.rerun()
 if clear_btn:
     st.session_state.well_data = clear_saved_tables()
     st.session_state.global_well_data = st.session_state.well_data.copy()
-    st.session_state.ai_optimizer.reset()
-    st.session_state.ai_optimizer.X_train_permanent = []
-    st.session_state.ai_optimizer.Y_train_permanent = []
+    populate_optimizer(
+        table = st.session_state.well_data,
+        optimizer= st.session_state.ai_optimizer
+    )
     st.rerun()
 
 # ——— DISPLAY HISTORY ———
@@ -501,7 +517,10 @@ def _ai_step() -> None:
     measured_color = color_data[row_idx][column - 1]
     st.session_state.ai_log.append(f"Measured: {measured_color}")
 
-    optimizer.add_data(vols, measured_color)
+    populate_optimizer(
+        st.session_state.well_data,
+        st.session_state.ai_optimizer,
+    )
     distance = optimizer.calculate_distance(measured_color, target_color)
     st.session_state.ai_log.append(f"Distance: {distance:.2f}")
 
@@ -515,10 +534,11 @@ def _ai_step() -> None:
         vols,
     )
 
-    if optimizer.within_tolerance(measured_color, target_color):
+    if distance < COLOR_THRESHOLD:
         st.session_state.ai_log.append(f"Matched with {vols}")
         st.session_state.ai_running = False
     else:
+        print(f"Failed to match- measured {measured_color}, target: {target_color}, distance: {distance}")
         st.session_state.ai_iter += 1
         if st.session_state.ai_iter >= MAX_GUESSES:
             print("AI exhausted all guesses without matching.")

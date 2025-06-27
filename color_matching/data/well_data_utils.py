@@ -53,10 +53,29 @@ def save_global_table(table: Dict[str, Dict[str, List[int] | str]]) -> None:
 
 
 def clear_saved_tables() -> Dict[str, Dict[str, List[int] | str]]:
+    """
+    Clears both the local and global saved tables.
+    """
     table = empty_table()
     save_table(table)
     save_global_table(table)
     return table
+
+def clear_current_saved_table() ->  Dict[str, Dict[str, List[int] | str]]:
+    """
+    Clears only the local table, not the global table.
+    """
+    table = empty_table()
+    save_table(table)
+    return table
+
+def restore_global_table() ->  Dict[str, Dict[str, List[int] | str]]:
+    """
+    Restores the local table from the global table.
+    """
+    global_table = load_global_table()
+    save_table(global_table)
+    return global_table
 
 def update_rgb_values(table: Dict[str, Dict[str, List[int] | str]], full_plate: List[List[List[int]]]) -> None:
     for r, row_letter in enumerate(ROWS):
@@ -94,18 +113,16 @@ def record_recipe(
 def populate_optimizer(
     table: Dict[str, Dict[str, List[int] | str]],
     optimizer,
-    *,
-    restore: bool = False,
 ) -> None:
     """Load recipe/RGB data into the optimizer."""
-    optimizer.X_train_permanent = []
-    optimizer.Y_train_permanent = []
+    optimizer.X_train = []
+    optimizer.Y_train = []
     for entry in table.values():
         recipe = entry["recipe"]
         rgb = entry["rgb"]
         if isinstance(recipe, list):
-            optimizer.X_train_permanent.append(recipe)
-            optimizer.Y_train_permanent.append(rgb)
-    if restore:
-        optimizer.restore_permanent_data()
+            optimizer.X_train.append(recipe)
+            optimizer.Y_train.append(rgb)
 
+    # And retrain the optimizer
+    optimizer.train()
