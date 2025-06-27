@@ -52,34 +52,23 @@ class ColorLearningOptimizer:
         print(f"  Min required volume: {self.min_required_volume}")
         self.X_train: List[List[int]] = []
         self.Y_train: List[List[int]] = []
-
-        self.X_train_permanent: List[List[int]] = []
-        self.Y_train_permanent: List[List[int]] = []
     
     def reset(self):
         print("Resetting optimizer for single row learning.")
         self.X_train: List[List[int]] = []
         self.Y_train: List[List[int]] = []
 
-    def restore_permanent_data(self):
-        """Restore the permanent training data."""
-        print("Restoring permanent training data.")
-        self.X_train = self.X_train_permanent.copy()
-        self.Y_train = self.Y_train_permanent.copy()
-        if len(self.X_train) >= 1:
-            X = np.array(self.X_train)
-            Y = np.array(self.Y_train)
-            for c, model in enumerate(self.models):
-                model.fit(X, Y[:, c])
-            print(f"Restored models with {len(self.X_train)} samples.")
-            print(f"Current training data: {self.X_train} -> {self.Y_train}")
-
     def add_data(self, volumes: list, measured_color: list) -> None:
         """Add an observed colour measurement."""
         self.X_train.append(volumes)
         self.Y_train.append(measured_color)
-        self.X_train_permanent.append(volumes)
-        self.Y_train_permanent.append(measured_color)
+        self.train()
+
+    def train(self) -> None:
+        """
+        Sometimes, it's necessary to just retrain the model instead of adding
+        more data.
+        """
         if len(self.X_train) >= 1:
             X = np.array(self.X_train)
             Y = np.array(self.Y_train)
@@ -87,7 +76,7 @@ class ColorLearningOptimizer:
                 model.fit(X, Y[:, c])
             print(f"Trained models with {len(self.X_train)} samples.")
             print(f"Current training data: {self.X_train} -> {self.Y_train}")
-
+        
     def suggest_next_experiment(self, target_color: list) -> list:
         """Propose the next dye volumes to test."""
 
@@ -220,7 +209,7 @@ class ColorLearningOptimizer:
 
 
         bounds = [(0, self.max_well_volume) for _ in range(self.dye_count)]
-        num_restarts = 100
+        num_restarts = 30
 
         best_val = float('inf')
         best_vols_continuous = None
@@ -233,7 +222,7 @@ class ColorLearningOptimizer:
                 x0,
                 method="trust-constr",
                 bounds=bounds,
-                options={"maxiter": 100},
+                options={"maxiter": 30},
                 constraints=[constraint],
             )
 

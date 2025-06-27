@@ -218,7 +218,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             color_well: str | int,
             plate_well: str,
             volume: float,
-            new_tip: bool = True) -> None:
+            new_tip: bool = True,
+            sterile: bool = False) -> None:
         """
         Adds a color to the plate at the specified well.
 
@@ -228,12 +229,16 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         :raises ValueError: If the well is already full.
         """
-        global tiprack_state, reduced_tips_info
+        global tiprack_state, reduced_tips_info, unique_id
         if volume + plate.wells[plate_well].volume > plate.wells[plate_well].max_volume:
             raise WellFullError("Cannot add color to well; well is full.")
 
         if new_tip:
-            pick_up_tip(tip_ID=color_well)
+            if sterile:
+                pick_up_tip(tip_ID=f'color_well_{unique_id}')
+                unique_id+=1
+            else:
+                pick_up_tip(tip_ID=color_well)
 
         pipette.aspirate(volume, colors[color_well])
         pipette.touch_tip(plate.labware[plate_well], v_offset=15, radius=0) # necessary to avoid crashing against the large adapter
@@ -245,12 +250,16 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
         if new_tip:
-            return_tip(tip_ID=color_well)
+            if sterile:
+                pipette.drop_tip()
+            else:
+                return_tip(tip_ID=color_well)
 
     def mix(
             plate_well: str | int,
             volume: float,
-            repititions: int) -> None:
+            repititions: int,
+            sterile: bool = False) -> None:
         """
         Mixes the contents of a well.
 
@@ -258,9 +267,13 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         :param volume: The volume to mix.
         :param repititions: The number of times to mix.
         """
-        global tiprack_state, reduced_tips_info
+        global tiprack_state, reduced_tips_info, unique_id
 
-        pick_up_tip("mix") # dedicated tip for mixing
+        if sterile:
+            pick_up_tip(f"mix_{unique_id}")
+            unique_id += 1
+        else:
+            pick_up_tip("mix") # dedicated tip for mixing
 
         pipette.touch_tip(plate.labware[plate_well], v_offset=95, radius=0) # necessary to avoid crashing against the large adapter
         # Quick mix (has to be manual because the default mix function doesn't work with the large adapter)
@@ -271,7 +284,10 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         # Blowout the remaining liquid in the pipette
         pipette.blow_out(plate.labware[plate_well].bottom(z=15))
 
-        return_tip("mix")
+        if sterile:
+            pipette.drop_tip()
+        else:
+            return_tip("mix")
 
 
 
@@ -312,13 +328,30 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         run_flag = False
         protocol.comment("Protocol closed.")
+        
+    def failed_to_run_actions(e: str) -> None:
+        """
+        Handle the case where the robot fails to run actions.
 
+        :param e: The error message.
+        """
+        # Set is_updated to False
+        data["is_updated"] = False
+        # Remove the actions key
+        data.pop("actions", None)
+
+        # Write the updated JSON back to the file
+        with open(get_filename('args.jsonx'), 'w') as f:
+            json.dump(data, f)
+        protocol.comment("args.jsonx updated. Waiting for next update...")
+        protocol.comment(f"Error: {e}. Waiting for next update...")
 
     ### MAIN PROTOCOL ###
 
     plate_type = "corning_96_wellplate_360ul_flat"
     fluids_slot = '2'
-    global tiprack_state, run_flag, reduced_tips_info
+    global tiprack_state, run_flag, reduced_tips_info, unique_id
+    unique_id = 0
     reduced_tips_info = None
     protocol.comment("Loading labware and instruments...")
     colors, plate, pipette, tiprack_state, off_deck_tipracks = setup(plate_type, fluids_slot)
@@ -422,7 +455,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     refresh_tiprack()
                 elif subaction_name == "add_color":
                     try:
-                        add_color(subaction_args["color_well"], subaction_args["plate_well"], subaction_args["volume"], subaction_args["new_tip"])
+                        add_color(subaction_args["color_well"], subaction_args["plate_well"], subaction_args["volume"], subaction_args["new_tip"], subaction_args["sterile"])
                     except WellFullError as e:
                         return failed_to_run_actions(e)
                     except TiprackEmptyError as e:
@@ -435,7 +468,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 elif subaction_name == "return_tip":
                     return_tip(tip_ID=subaction_args.get("tip_ID", None))
                 elif subaction_name == "mix":
-                    mix(subaction_args["plate_well"], subaction_args["volume"], subaction_args["repetitions"])
+                    mix(subaction_args["plate_well"], subaction_args["volume"], subaction_args["repetitions"], subaction_args["sterile"])
                 elif subaction_name == "calibrate_96_well_plate":
                     calibrate_96_well_plate()
                 elif subaction_name == "close":
@@ -463,19 +496,4 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         protocol.comment("Ready")
 
 
-    def failed_to_run_actions(e: str) -> None:
-        """
-        Handle the case where the robot fails to run actions.
-
-        :param e: The error message.
-        """
-        # Set is_updated to False
-        data["is_updated"] = False
-        # Remove the actions key
-        data.pop("actions", None)
-
-        # Write the updated JSON back to the file
-        with open(get_filename('args.jsonx'), 'w') as f:
-            json.dump(data, f)
-        protocol.comment("args.jsonx updated. Waiting for next update...")
-        protocol.comment(f"Error: {e}. Waiting for next update...")
+    

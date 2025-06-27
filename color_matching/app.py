@@ -1,5 +1,6 @@
 # app.py
 from pathlib import Path
+from string import ascii_uppercase
 import sys 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -16,6 +17,16 @@ from typing import Iterable
 import itertools
 from sklearn.decomposition import PCA
 from GP_visualizer import plot_gp_predictions
+from color_matching.data.well_data_utils import (
+    load_table,
+    load_global_table,
+    clear_saved_tables,
+    clear_current_saved_table,
+    restore_global_table,
+    record_measurements,
+    record_recipe,
+    populate_optimizer,
+)
 
 def rerun() -> None:
     """Trigger a Streamlit rerun regardless of version."""
@@ -37,6 +48,7 @@ VIRTUAL_MODE = False  # set to True for virtual mode
 
 OT_NUMBER = 4
 
+STERILE = True
 WHITE_THRESHOLD = 120  # RGB threshold for white detection
 
 
@@ -44,7 +56,7 @@ WHITE_THRESHOLD = 120  # RGB threshold for white detection
 color_wells  = ["A1", "A2", "A3"]
 dye_colors = ['r', 'y', 'b']  # red, yellow, blue, for visuals only, never to be fed to the AI
 
-FORCE_REMOTE = True  # set to True to force remote connection
+FORCE_REMOTE = False  # set to True to force remote connection
 
 # ——— info.json ———
 try:
@@ -94,12 +106,21 @@ if "robot" not in st.session_state:
         )
 
     st.session_state.robot.add_turn_on_lights_action()
-    st.session_state.robot.execute_actions_on_remote()
+    try:
+        st.session_state.robot.execute_actions_on_remote()
+    except RuntimeError:
+        if st.session_state.robot.last_error_type == TiprackEmptyError:
+            input("Please add a fresh tiprack. Press enter when you're ready to continue.")
+            st.session_state.robot.add_refresh_tiprack_action()
+            st.session_state.robot.execute_actions_on_remote()
+
 
     print("Lights turned on.")
     time.sleep(2)  # wait for lights to stabilize
 
 st.session_state.processor = PlateProcessor(virtual_mode=VIRTUAL_MODE)
+st.session_state.setdefault("well_data", load_table())
+st.session_state.setdefault("global_well_data", load_global_table())
 
 # track how many guesses we've made per row, and the measured RGBs+distances
 for row in ROWS:
@@ -128,6 +149,10 @@ if st.session_state.ai_optimizer is None:
             tolerance=COLOR_THRESHOLD,
             single_row_learning=False,
         )
+    populate_optimizer(
+        st.session_state.global_well_data,
+        st.session_state.ai_optimizer,
+    )
     #st.session_state.ai_optimizer.X_train = x_history
     #st.session_state.ai_optimizer.Y_train = y_history
 
@@ -144,34 +169,41 @@ st.markdown(
 row = st.selectbox("Select row", ROWS, disabled=st.session_state.ai_running)
 
 # ——— ROW SWITCH: re-read plate & prepopulate history ———
-if st.session_state.get("last_row") != row:
-    st.session_state.last_row = row
+st.session_state.last_row = row
 
-    # reset counters & history
-    st.session_state[f"guesses_{row}"] = 0
-    st.session_state[f"history_{row}"] = []
+# reset counters & history
+st.session_state[f"guesses_{row}"] = 0
+st.session_state[f"history_{row}"] = []
 
-    # snap the whole plate
-    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX,
-                                                          calib=f"secret/OT_{OT_NUMBER}/calibration.json")
+# snap the whole plate
+full_plate = st.session_state.processor.process_image(
+    cam_index=CAM_INDEX,
+    calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+)
+record_measurements(
+    st.session_state.well_data,
+    st.session_state.global_well_data,
+    full_plate,
+)
 
-    # extract the mystery target
-    r_m, g_m, b_m = full_plate[ord(row) - ord("A")][MYSTERY_COL - 1]
-    myst_rgb = np.array([r_m, g_m, b_m])
-    st.session_state[f"mystery_rgb_{row}"] = myst_rgb.tolist()
+# extract the mystery target
+r_m, g_m, b_m = st.session_state.global_well_data[f'{row}{MYSTERY_COL}']['rgb']
+myst_rgb = np.array([r_m, g_m, b_m])
+st.session_state[f"mystery_rgb_{row}"] = myst_rgb.tolist()
 
-    # now scan existing guesses in cols 2→12
-    prehist = []
-    for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
-        rgb = full_plate[ord(row) - ord("A")][col]
-        # white threshold:
-        if any(ch < WHITE_THRESHOLD for ch in rgb):
-            dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
-            prehist.append((rgb.tolist(), dist))
+# now scan existing guesses in cols 2→12
+prehist = []
+for col in range(FIRST_GUESS_COL - 1, MAX_WELLS_PER_ROW):
+    rgb = np.array(st.session_state.global_well_data[f'{row}{col}']['rgb'])
+    recipe = st.session_state.global_well_data[f'{row}{col}']['recipe']
+    # white threshold:
+    if recipe not in ['empty', 'unknown']:
+        dist = float(np.linalg.norm(rgb.astype(float) - myst_rgb))
+        prehist.append((rgb.tolist(), dist))
 
-    # seed session_state
-    st.session_state[f"history_{row}"] = prehist
-    st.session_state[f"guesses_{row}"]  = len(prehist)
+# seed session_state
+st.session_state[f"history_{row}"] = prehist
+st.session_state[f"guesses_{row}"]  = len(prehist)
 
 st.markdown(f"**Mystery color (Col {MYSTERY_COL}) for row {row}:**")
 r, g, b = st.session_state[f"mystery_rgb_{row}"]
@@ -236,6 +268,7 @@ restore_btn = st.button(
     "Restore model knowledge",
     disabled=st.session_state.ai_running,
 )
+clear_btn = st.button("Clear saved recipes", disabled=st.session_state.ai_running)
 
 # ——— ACTION ———
 if make_btn:
@@ -249,22 +282,36 @@ if make_btn:
         if vol > 0:
             robot.add_add_color_action(tip_ID=slot,
                                        plate_well=target_well,
-                                       volume=int(vol))
+                                       volume=int(vol),
+                                       sterile=STERILE)
             total_vol += vol
     robot.add_mix_action(
         plate_well=target_well,
         volume=total_vol/2,
-        repetitions=3
+        repetitions=3,
+        sterile=STERILE
     )
     try:
-        robot.execute_actions_on_remote()
-    except Exception as e:
-        st.error(f"Robot error: {e}")
-        st.stop()
+        st.session_state.robot.execute_actions_on_remote()
+    except RuntimeError:
+        if st.session_state.robot.last_error_type == TiprackEmptyError:
+            input("Please add a fresh tiprack. Press enter when you're ready to continue.")
+            st.session_state.robot.add_refresh_tiprack_action()
+            st.session_state.robot.execute_actions_on_remote()
+        else:
+            st.stop()
+            
 
     # photo & measure
-    full_plate = st.session_state.processor.process_image(cam_index=CAM_INDEX,
-                                                          calib=f"secret/OT_{OT_NUMBER}/calibration.json")
+    full_plate = st.session_state.processor.process_image(
+        cam_index=CAM_INDEX,
+        calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+    )
+    record_measurements(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        full_plate,
+    )
     # for debug: plot the full plate and all colors
     #st.image(full_plate, caption="Full plate image", use_column_width=True)
     row_idx = ord(row) - ord("A")
@@ -276,14 +323,24 @@ if make_btn:
     hist = st.session_state[f"history_{row}"]
     hist.append((rgb.tolist(), dist))
     st.session_state[f"guesses_{row}"] += 1
+    record_recipe(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        target_well,
+        [int(volumes[s]) for s in color_wells],
+    )
     rerun()
 
 if deploy_btn:
+    st.session_state.well_data = load_table()
+    st.session_state.global_well_data = load_global_table()
+    st.session_state.ai_target = st.session_state.well_data[
+        f"{row}{MYSTERY_COL}"
+    ]["rgb"]
     st.session_state.ai_running = True
     st.session_state.ai_row = row
     st.session_state.ai_iter = 0
     st.session_state.ai_used_combos = set()
-    st.session_state.ai_target = st.session_state[f"mystery_rgb_{row}"]
     st.session_state.ai_log = []
     st.session_state.ai_step_pending = True
     rerun()
@@ -298,10 +355,35 @@ if close_btn:
         st.stop()
 
 if reset_btn:
-    st.session_state.ai_optimizer.reset()
+    st.session_state.well_data = clear_current_saved_table()
+    populate_optimizer(
+        st.session_state.well_data,
+        st.session_state.ai_optimizer,
+    )
     st.rerun()
 if restore_btn:
-    st.session_state.ai_optimizer.restore_permanent_data()
+    color_data = st.session_state.processor.process_image(
+        cam_index=CAM_INDEX,
+        calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+    )
+    record_measurements(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        color_data,
+    )
+    st.session_state.well_data = restore_global_table()
+    populate_optimizer(
+        st.session_state.global_well_data,
+        st.session_state.ai_optimizer,
+    )
+    st.rerun()
+if clear_btn:
+    st.session_state.well_data = clear_saved_tables()
+    st.session_state.global_well_data = st.session_state.well_data.copy()
+    populate_optimizer(
+        table = st.session_state.well_data,
+        optimizer= st.session_state.ai_optimizer
+    )
     st.rerun()
 
 # ——— DISPLAY HISTORY ———
@@ -375,7 +457,12 @@ def _ai_step() -> None:
     optimizer: ColorLearningOptimizer = st.session_state.ai_optimizer
     robot = st.session_state.robot
     processor = st.session_state.processor
-    target_color: Iterable[int] = st.session_state.ai_target
+    st.session_state.well_data = load_table()
+    st.session_state.global_well_data = load_global_table()
+    target_color: Iterable[int] = st.session_state.well_data[
+        f"{row_letter}{MYSTERY_COL}"
+    ]["rgb"]
+    st.session_state.ai_target = target_color
     iteration: int = st.session_state.ai_iter
     used: set = st.session_state.ai_used_combos
 
@@ -417,11 +504,13 @@ def _ai_step() -> None:
                         color_well=color_wells[i],
                         plate_well=well_coordinate,
                         volume=volume,
+                        sterile = STERILE,
                     )
             robot.add_mix_action(
                 plate_well=well_coordinate,
                 volume=optimizer.max_well_volume / 2,
                 repetitions=3,
+                sterile = STERILE,
             )
             robot.execute_actions_on_remote()
             break
@@ -433,23 +522,40 @@ def _ai_step() -> None:
             else:
                 raise
 
-    color_data = processor.process_image(cam_index=CAM_INDEX,
-                                         calib=f"secret/OT_{OT_NUMBER}/calibration.json")
+    color_data = processor.process_image(
+        cam_index=CAM_INDEX,
+        calib=f"secret/OT_{OT_NUMBER}/calibration.json",
+    )
+    record_measurements(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        color_data,
+    )
     measured_color = color_data[row_idx][column - 1]
     st.session_state.ai_log.append(f"Measured: {measured_color}")
 
-    optimizer.add_data(vols, measured_color)
+    populate_optimizer(
+        st.session_state.well_data,
+        st.session_state.ai_optimizer,
+    )
     distance = optimizer.calculate_distance(measured_color, target_color)
     st.session_state.ai_log.append(f"Distance: {distance:.2f}")
 
     hist = st.session_state[f"history_{row_letter}"]
     hist.append((measured_color.tolist(), float(distance)))
     st.session_state[f"guesses_{row_letter}"] += 1
+    record_recipe(
+        st.session_state.well_data,
+        st.session_state.global_well_data,
+        well_coordinate,
+        vols,
+    )
 
-    if optimizer.within_tolerance(measured_color, target_color):
+    if distance < COLOR_THRESHOLD:
         st.session_state.ai_log.append(f"Matched with {vols}")
         st.session_state.ai_running = False
     else:
+        print(f"Failed to match- measured {measured_color}, target: {target_color}, distance: {distance}")
         st.session_state.ai_iter += 1
         if st.session_state.ai_iter >= MAX_GUESSES:
             print("AI exhausted all guesses without matching.")
